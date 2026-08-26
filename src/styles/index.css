@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #0f172a;
+  --color-app-accent: #facc15;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
