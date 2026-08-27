@@ -1,4 +1,4 @@
-import type { DayType, Entry, Period } from "@/types/models";
+import type { DayType, Entry, Period, PeriodNaming } from "@/types/models";
 
 export interface PeriodTotals {
   amount: number;
@@ -7,14 +7,92 @@ export interface PeriodTotals {
   remaining_to_norm: number;
 }
 
-export function calculatePeriodTotals(
-  _period: Pick<Period, "extra_amount" | "norm_hours">,
-  _entries: Entry[],
-  _dayTypeById: Map<string, Pick<DayType, "counts_as_work" | "counts_toward_norm">>,
-): PeriodTotals {
-  throw new Error("not implemented");
+export interface PeriodId {
+  year: number;
+  month: number;
 }
 
-export function periodForDate(_date: Date, _periodStartDay: number): { year: number; month: number } {
-  throw new Error("not implemented");
+function daysInMonth(year: number, monthIndex0: number): number {
+  return new Date(year, monthIndex0 + 1, 0).getDate();
+}
+
+function clampDayToMonth(year: number, monthIndex0: number, day: number): number {
+  return Math.min(day, daysInMonth(year, monthIndex0));
+}
+
+export function calculatePeriodTotals(
+  period: Pick<Period, "extra_amount" | "norm_hours">,
+  entries: Entry[],
+  dayTypeById: Map<string, Pick<DayType, "counts_as_work" | "counts_toward_norm">>,
+): PeriodTotals {
+  let amount = period.extra_amount;
+  let total_hours = 0;
+  let norm_hours_covered = 0;
+
+  for (const entry of entries) {
+    const dayType = dayTypeById.get(entry.day_type_id);
+    amount += entry.amount;
+    if (dayType?.counts_as_work) total_hours += entry.hours;
+    if (dayType?.counts_toward_norm) norm_hours_covered += entry.hours;
+  }
+
+  return {
+    amount,
+    total_hours,
+    norm_hours_covered,
+    remaining_to_norm: period.norm_hours - norm_hours_covered,
+  };
+}
+
+/**
+ * Периоды не хранят ссылку на дату — идентификатор периода (year/month) всегда
+ * вычисляется заново. Идентификатор всегда привязан к месяцу, в котором период
+ * начинается (period_naming влияет только на отображаемую подпись, см. getPeriodLabel).
+ */
+export function periodForDate(date: Date, periodStartDay: number): PeriodId {
+  const calendarYear = date.getFullYear();
+  const calendarMonthIndex0 = date.getMonth();
+  const startDay = clampDayToMonth(calendarYear, calendarMonthIndex0, periodStartDay);
+
+  let year = calendarYear;
+  let month = calendarMonthIndex0 + 1;
+
+  if (date.getDate() < startDay) {
+    month -= 1;
+    if (month === 0) {
+      month = 12;
+      year -= 1;
+    }
+  }
+
+  return { year, month };
+}
+
+export function getPeriodDateRange(year: number, month: number, periodStartDay: number): { start: Date; end: Date } {
+  const monthIndex0 = month - 1;
+  const startDay = clampDayToMonth(year, monthIndex0, periodStartDay);
+  const start = new Date(year, monthIndex0, startDay);
+
+  const nextStartDay = clampDayToMonth(year, monthIndex0 + 1, periodStartDay);
+  const end = new Date(year, monthIndex0 + 1, nextStartDay - 1);
+
+  return { start, end };
+}
+
+export function getAdjacentPeriod(year: number, month: number, delta: number): PeriodId {
+  const total = year * 12 + (month - 1) + delta;
+  const resultYear = Math.floor(total / 12);
+  const resultMonth = total - resultYear * 12 + 1;
+  return { year: resultYear, month: resultMonth };
+}
+
+/**
+ * period_naming определяет только подпись периода в интерфейсе, не его идентификатор:
+ * иначе переключение настройки задним числом переносило бы записи между строками periods.
+ */
+export function getPeriodLabel(year: number, month: number, periodStartDay: number, periodNaming: PeriodNaming): PeriodId {
+  if (periodNaming === "start_month") return { year, month };
+
+  const { end } = getPeriodDateRange(year, month, periodStartDay);
+  return { year: end.getFullYear(), month: end.getMonth() + 1 };
 }

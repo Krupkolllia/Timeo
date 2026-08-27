@@ -8,11 +8,11 @@ export class TimeoDB extends Dexie {
   entries!: EntityTable<Entry, "id">;
   holidays!: EntityTable<Holiday, "id">;
 
-  constructor() {
-    super("timeo");
+  constructor(name = "timeo") {
+    super(name);
     this.version(1).stores({
       settings: "id, user_id",
-      periods: "id, user_id, [year+month]",
+      periods: "id, user_id, [year+month], [user_id+year+month]",
       day_types: "id, user_id, sort_order",
       entries: "id, user_id, date, day_type_id",
       holidays: "id, user_id, date",
