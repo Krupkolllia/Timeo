@@ -141,3 +141,21 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Timeo project additions
+dist-ssr/
+*.local
+
+# Cloudflare
+.wrangler/
+.dev.vars
+
+# Claude Code
+.claude/settings.local.json
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.swp
