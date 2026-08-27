@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 # Timeo project additions
 dist-ssr/
 *.local
+TIMEO-SPEC.md
 
 # Cloudflare
 .wrangler/
