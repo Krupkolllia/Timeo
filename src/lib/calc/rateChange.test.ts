@@ -68,13 +68,15 @@ describe("planRateChange — пересчёт всего периода", () => 
     ]);
   });
 
-  it("умножает новую ставку на множитель записи", () => {
+  it("ставит новую базовую ставку в поле, а множитель применяет к сумме", () => {
     const patches = plan("recalculate_period", [
-      entry({ id: "a", date: "2026-03-10", multiplier: 1.5, rate_per_hour: 45, amount: 360 }),
+      entry({ id: "a", date: "2026-03-10", multiplier: 1.5, rate_per_hour: 30, amount: 360 }),
     ]);
 
-    expect(patches[0].rate_per_hour).toBe(60);
-    expect(patches[0].amount).toBe(480);
+    // Множитель в ставку не входит: в поле оказывается ровно новая базовая
+    // ставка, а ×1.5 участвует только в сумме.
+    expect(patches[0].rate_per_hour).toBe(40);
+    expect(patches[0].amount).toBe(480); // 8 × 40 × 1.5
   });
 
   it("не трогает записи с ручной ставкой (инвариант 9)", () => {

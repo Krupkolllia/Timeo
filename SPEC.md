@@ -329,9 +329,17 @@ if rate_is_manual:
 else if day_type.rate_mode = pinned:
     rate = day_type.pinned_rate                   source = type_pinned
 else:
-    rate = period.base_rate × multiplier
+    rate = period.base_rate
     entry.rate_per_hour := rate                   // the result is stored on the entry
 ```
+
+**The multiplier is not part of the rate.** The rate is a rate: the period base rate, or the one
+typed by hand, and that is exactly what the rate field shows. The multiplier is a separate
+coefficient applied only when the day's amount is computed, see 6.4.
+
+Folding the multiplier into the rate would make it useless in the one case that matters most: on a
+period whose base rate is not set yet, `base_rate × multiplier` is zero whatever the multiplier is,
+and a rate typed by hand would never be multiplied at all.
 
 ### 6.4 Amount
 
@@ -339,11 +347,12 @@ else:
 if amount_override is set:        amount = amount_override
 else if pay_mode = unpaid:        amount = 0
 else if pay_mode = fixed_amount:  amount = day_type.fixed_amount
-else:                             amount = duration_in_hours × rate
+else:                             amount = duration_in_hours × rate × multiplier
 ```
 
-Rounding to the grosz happens **once**, on the daily amount. Rates and multipliers are not rounded in
-intermediate steps. The period total is the sum of already-rounded daily amounts, with no second
+Rounding to the grosz happens **once**, on the daily amount — that is, on the whole
+`hours × rate × multiplier` product. The rate itself is stored rounded, because it is a value the
+user sees and edits in a field; multipliers are not rounded in intermediate steps. The period total is the sum of already-rounded daily amounts, with no second
 rounding pass.
 
 ### 6.5 Period totals

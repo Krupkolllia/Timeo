@@ -3,9 +3,14 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
 import { NumberInput } from "@/components/NumberInput";
 import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } from "@/db/entries";
-import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
+import {
+  applyMultiplierEdit,
+  applyRateEdit,
+  buildEntryDefaultsForDayType,
+  calculateEntryAmount,
+  type EntryDefaults,
+} from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
-import { roundMultiplier } from "@/lib/calc/round";
 import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
@@ -274,50 +279,18 @@ export function DayScreen({
     void persist({ ...draft, hours, amount, rate_per_hour });
   }
 
+  // Правила правки множителя и ставки живут в lib/calc/entry: они уже ломались
+  // дважды, а компонент тестами не покрыт.
   function handleMultiplierChange(multiplier: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Раздел 3 ТЗ: правка множителя переводит ставку в авто-режим и пересчитывает
-    // её из base_rate периода — источник истины всегда base_rate × multiplier.
-    const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, multiplier, rate_is_manual: false },
-      dayType,
-      period,
-    );
-    // rate_source по-прежнему выводится из правила раздела 6.2: если введённое
-    // значение совпадает с тем, что дало бы авто-правило (праздник/выходной/тип
-    // дня), считаем его тем же источником; иначе это уже не привязано ни к
-    // какому правилу, и ближайшее по смыслу значение — "ставка периода".
-    const auto = resolveMultiplier(parsedDate, dayType, holiday, settings.weekend_multipliers);
-    const rate_source = mapRateSource(auto.value === multiplier ? auto.source : "default", false);
-    void persist({ ...draft, multiplier, rate_is_manual: false, rate_per_hour, amount, rate_source });
+    void persist({ ...draft, ...applyMultiplierEdit(draft, multiplier, dayType, period) });
   }
 
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Раздел 3 ТЗ: поля связаны в обе стороны. Ставка, введённая руками, задаёт
-    // множитель = ставка / базовая ставка периода — иначе на экране остаётся пара
-    // «×2 и 50 zł», которая при base_rate 33.3 не может быть верной одновременно.
-    // При базовой ставке 0 делить не на что — множитель оставляем как есть.
-    const multiplier = period.base_rate !== 0 ? roundMultiplier(rate / period.base_rate) : draft.multiplier;
-    // rate_is_manual=true сохраняется: по разделу 6.1 вписанная пользователем
-    // ставка перестаёт зависеть от base_rate, и calculateEntryAmount возьмёт
-    // именно её, а не пересчитает из множителя. Множитель здесь — производное
-    // значение для отображения и истории.
-    const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, multiplier, rate_per_hour: rate, rate_is_manual: true },
-      dayType,
-      period,
-    );
-    void persist({
-      ...draft,
-      multiplier,
-      rate_is_manual: true,
-      rate_per_hour,
-      amount,
-      rate_source: mapRateSource("default", true),
-    });
+    void persist({ ...draft, ...applyRateEdit(draft, rate, dayType, period) });
   }
 
   function handleNoteChange(note: string) {
@@ -403,7 +376,18 @@ export function DayScreen({
         : ru.day.multiplierSourceManual;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
-  const showZeroRateHint = dayType?.pay_mode === "hourly" && !isManualAmount && (draft?.rate_per_hour ?? 0) === 0;
+  // Нулевая базовая ставка периода — причина, а «ставка за час равна нулю» —
+  // следствие. Показываем причину и путь к ней, иначе экран объясняет одно и то
+  // же дважды и ни разу не говорит, что с этим делать. Условие — именно
+  // «ставка не задана руками», а не «ставка равна нулю»: ноль, вписанный
+  // человеком, разделу 9 не противоречит и объяснять его нечем.
+  const showNoBaseRateHint =
+    dayType?.pay_mode === "hourly" && period.base_rate === 0 && draft?.rate_is_manual === false;
+  const showZeroRateHint =
+    dayType?.pay_mode === "hourly" &&
+    !isManualAmount &&
+    !showNoBaseRateHint &&
+    (draft?.rate_per_hour ?? 0) === 0;
 
   // Раздел 6.1: unpaid всегда даёт 0, и множитель со ставкой на результат не
   // влияют. Раздел 8 запрещает запрещать — поля остаются редактируемыми
@@ -573,6 +557,20 @@ export function DayScreen({
             <div className="flex min-h-[92px] items-start rounded-lg bg-white/5 px-3 py-2 text-sm text-white/50">
               {ru.day.payModeFixedAmount}
             </div>
+          )}
+
+          {/* Раздел 8.4: базовая ставка периода правится на экране периода, а не
+              здесь, поэтому подсказка не поле, а путь туда. Ряд на всю ширину,
+              а не подпись под множителем: в колонке 175px этот текст занял бы
+              три строки и развалил бы сетку двух полей. */}
+          {showNoBaseRateHint && (
+            <button
+              onClick={onOpenPeriod}
+              className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+            >
+              <span className="text-xs text-white/50">{ru.day.hintNoBaseRate}</span>
+              <span className="shrink-0 text-xs font-semibold text-app-accent">{ru.day.hintNoBaseRateAction}</span>
+            </button>
           )}
 
           {settings.show_shift_times && (
