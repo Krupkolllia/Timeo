@@ -153,6 +153,7 @@ TIMEO-SPEC.md
 
 # Claude Code
 .claude/settings.local.json
+.claude/worktrees/
 
 # Editors and OS
 .vscode/*
