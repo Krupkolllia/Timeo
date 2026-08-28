@@ -63,6 +63,7 @@ export const ru = {
     startTime: "Начало",
     endTime: "Конец",
     breakMinutes: "Перерыв, мин",
+    addEntry: "Добавить запись",
     deleteEntry: "Удалить запись",
     deletedNotice: "Запись удалена",
     undo: "Отменить",

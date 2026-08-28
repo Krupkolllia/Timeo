@@ -110,7 +110,14 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   );
   const dayTypeById = useMemo(() => new Map(dayTypes.map((dt) => [dt.id, dt])), [dayTypes]);
 
-  const entries = useLiveQuery(() => listActiveEntriesForDate(db, userId, date), [userId, date]);
+  // Детерминированный порядок: Dexie отдаёт записи по индексу date, порядок
+  // вставки внутри одной даты не гарантирован, а полоска записей и выбор
+  // «первой» не должны прыгать между перечитываниями.
+  const entries = useLiveQuery(
+    async () =>
+      (await listActiveEntriesForDate(db, userId, date)).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [userId, date],
+  );
   const holiday = useLiveQuery(
     () =>
       db.holidays
@@ -121,7 +128,12 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     [userId, date],
   );
 
-  const entry = entries?.[0];
+  // Раздел 5.4: «допускается несколько записей на один день». Без выбора экран
+  // открывал только entries[0]: вторая запись была невидима, недоступна для
+  // правки, а «Удалить запись» удаляла не ту, которую видит пользователь.
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const entry = selectedEntryId ? entries?.find((e) => e.id === selectedEntryId) : entries?.[0];
+
   const parsedDate = useMemo(() => {
     const [y, m, d] = date.split("-").map(Number);
     return new Date(y, m - 1, d);
@@ -146,17 +158,18 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   // instead of silently discarding them for the new type's defaults.
   const hasEditedRef = useRef(false);
 
-  // Запись, созданную этим же экраном, отличаем от записи, приехавшей извне.
+  // Какой записи соответствует текущий черновик (null — записи ещё нет).
   // Отдельный ref, а не entryIdRef: тот синхронизируется эффектом выше, который
   // объявлен раньше и успевает отработать первым — проверка стала бы всегда истинной.
-  const selfCreatedIdRef = useRef<string | null>(null);
+  const draftEntryIdRef = useRef<string | null>(null);
 
   // Флаг «пользователь уже вводил значения» живёт на время посещения дня, а не
   // строки в базе: первый же ввод создаёт запись и меняет entry.id, и общий
   // эффект инициализации сбрасывал бы флаг ровно тогда, когда вводить начали.
   useEffect(() => {
     hasEditedRef.current = false;
-    selfCreatedIdRef.current = null;
+    draftEntryIdRef.current = null;
+    setSelectedEntryId(null);
   }, [date]);
 
   // Инициализация/переключение черновика — только когда меняется сама запись
@@ -164,9 +177,12 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   // собственная запись экрана эхом прилетала бы обратно и перетирала то, что
   // пользователь только что набирает в поле.
   useEffect(() => {
-    // Собственная только что созданная запись — черновик уже актуален, повторная
-    // инициализация затёрла бы то, что пользователь набирает прямо сейчас.
-    if (entry && entry.id === selfCreatedIdRef.current) return;
+    // Создание записи в полёте: черновик уже содержит то, что пользователь
+    // ввёл, а entries на этот момент ещё показывает прежний состав дня.
+    if (creatingRef.current) return;
+    // Черновик уже соответствует этой записи — повторная инициализация затёрла
+    // бы то, что пользователь набирает прямо сейчас.
+    if (entry && entry.id === draftEntryIdRef.current) return;
 
     if (entry) {
       setDraft(entryToDraft(entry));
@@ -182,8 +198,9 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     } else {
       setDraft(null);
     }
+    draftEntryIdRef.current = entry?.id ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, date]);
+  }, [entry?.id, date, selectedEntryId]);
 
   const dayType = draft ? dayTypeById.get(draft.day_type_id) : undefined;
 
@@ -200,7 +217,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
       entryIdRef.current = created.id;
-      selfCreatedIdRef.current = created.id;
+      draftEntryIdRef.current = created.id;
       await updateEntry(db, created.id, next);
       return;
     }
@@ -209,8 +226,11 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     creatingRef.current = promise;
     const created = await promise;
     entryIdRef.current = created.id;
-    selfCreatedIdRef.current = created.id;
+    draftEntryIdRef.current = created.id;
     creatingRef.current = null;
+    // Только что созданная запись становится выбранной: иначе на дне с
+    // несколькими записями экран продолжил бы показывать первую.
+    setSelectedEntryId(created.id);
   }
 
   function handleSelectDayType(dt: DayType) {
@@ -311,11 +331,41 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     void persist({ ...draft, ...patch });
   }
 
+  function handleAddEntry() {
+    if (activeDayTypes.length === 0) return;
+    // Новая строка, а не правка текущей: сбрасываем и выбранную запись, и
+    // ссылки, по которым persist решает, обновлять или вставлять.
+    setSelectedEntryId(null);
+    entryIdRef.current = null;
+    creatingRef.current = null;
+    draftEntryIdRef.current = null;
+    hasEditedRef.current = false;
+    const defaults = buildEntryDefaultsForDayType(
+      parsedDate,
+      activeDayTypes[0],
+      period,
+      holiday,
+      settings.weekend_multipliers,
+    );
+    void persist(draftFromDefaults(activeDayTypes[0].id, defaults));
+  }
+
   async function handleDelete() {
     if (!entry) return;
-    await softDeleteEntry(db, entry.id);
-    onEntryDeleted(entry);
-    onClose();
+    const deleted = entry;
+    await softDeleteEntry(db, deleted.id);
+    onEntryDeleted(deleted);
+
+    // Шторку закрываем только если день опустел: удаление одной из нескольких
+    // записей не должно выкидывать пользователя из дня.
+    const remaining = (entries ?? []).filter((e) => e.id !== deleted.id);
+    entryIdRef.current = null;
+    draftEntryIdRef.current = null;
+    if (remaining.length === 0) {
+      onClose();
+      return;
+    }
+    setSelectedEntryId(remaining[0].id);
   }
 
   const isManualAmount = draft?.amount_override !== null && draft?.amount_override !== undefined;
@@ -352,6 +402,25 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     // контента и overflow-y-auto не срабатывает. Лимит высоты — на панели
     // целиком (.day-sheet в CalendarPage), здесь только скроллируемая часть.
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+      {/* Полоска записей — только когда их больше одной: обычный день с одной
+          записью должен выглядеть ровно как раньше. */}
+      {entries && entries.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto">
+          {entries.map((e, index) => (
+            <button
+              key={e.id}
+              onClick={() => setSelectedEntryId(e.id)}
+              className={`min-h-11 shrink-0 rounded-lg px-3 text-sm ${
+                e.id === entry?.id ? "bg-white/15 text-white" : "bg-white/5 text-white/60"
+              }`}
+            >
+              {index + 1}. {dayTypeById.get(e.day_type_id)?.name} · {e.hours}
+              {ru.calendar.hoursShort}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2">
         {activeDayTypes.length === 0 && <p className="col-span-3 text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
@@ -529,11 +598,16 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
             />
           </div>
 
-          {entry && (
-            <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
-              {ru.day.deleteEntry}
+          <div className="flex items-center justify-between gap-3">
+            <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleAddEntry}>
+              {ru.day.addEntry}
             </button>
-          )}
+            {entry && (
+              <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
+                {ru.day.deleteEntry}
+              </button>
+            )}
+          </div>
         </>
       )}
 

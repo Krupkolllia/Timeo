@@ -4,7 +4,7 @@ import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
 import { getOrCreatePeriod } from "@/db/periods";
-import { listActiveEntriesForDate, restoreEntry } from "@/db/entries";
+import { restoreEntry } from "@/db/entries";
 import type { Entry } from "@/types/models";
 import {
   calculatePeriodTotals,
@@ -16,7 +16,7 @@ import {
   type PeriodId,
 } from "@/lib/calc/period";
 import { buildWeeks, toISODate } from "@/lib/calc/calendarGrid";
-import { roundMoney } from "@/lib/calc/round";
+import { roundHours, roundMoney } from "@/lib/calc/round";
 import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
@@ -126,21 +126,26 @@ export function CalendarPage() {
   async function handleUndoDelete() {
     if (!pendingUndo) return;
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-    // Пока была открыта плашка "отменить", пользователь мог зайти на тот же
-    // день и создать новую запись поверх удалённой. В этом узком случае не
-    // восстанавливаем старую — иначе на дату окажется две активные записи, и
-    // calculatePeriodTotals задвоит сумму/часы за день. Компромисс: удалённая
-    // запись остаётся удалённой, а свежесозданная — единственный источник
-    // истины за эту дату.
-    const alreadyReplaced = (await listActiveEntriesForDate(db, pendingUndo.user_id, pendingUndo.date)).length > 0;
-    if (!alreadyReplaced) {
-      await restoreEntry(db, pendingUndo.id);
-    }
+    // Раньше здесь стояла проверка «на дату уже появилась активная запись — не
+    // восстанавливаем», чтобы не получить две строки за день. С поддержкой
+    // нескольких записей (раздел 5.4) восстановление всегда безопасно.
+    await restoreEntry(db, pendingUndo.id);
     setPendingUndo(null);
   }
 
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
-  const entryByDate = useMemo(() => new Map((entries ?? []).map((entry) => [entry.date, entry])), [entries]);
+  // Раздел 5.4 допускает несколько записей на один день, поэтому дата
+  // отображается в список: Map<string, Entry> терял все записи, кроме последней,
+  // и ячейка расходилась с нижней панелью, которая суммирует их все.
+  const entriesByDate = useMemo(() => {
+    const map = new Map<string, Entry[]>();
+    for (const entry of entries ?? []) {
+      const list = map.get(entry.date);
+      if (list) list.push(entry);
+      else map.set(entry.date, [entry]);
+    }
+    return map;
+  }, [entries]);
 
   const totals = useMemo(() => {
     if (!period) return null;
@@ -202,8 +207,8 @@ export function CalendarPage() {
             {week.map((date) => {
               const iso = toISODate(date);
               const inPeriod = date >= range.start && date <= range.end;
-              const entry = entryByDate.get(iso);
-              const dayType = entry ? dayTypeById.get(entry.day_type_id) : undefined;
+              const dayEntries = entriesByDate.get(iso) ?? [];
+              const dayHours = roundHours(dayEntries.reduce((sum, e) => sum + e.hours, 0));
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
 
               return (
@@ -216,8 +221,25 @@ export function CalendarPage() {
                   } ${isWeekend && inPeriod ? "text-app-accent" : "text-white"}`}
                 >
                   <span>{date.getDate()}</span>
-                  {dayType && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dayType.color }} />}
-                  {entry && entry.hours > 0 && <span className="text-[10px] text-white/50">{entry.hours}{ru.calendar.hoursShort}</span>}
+                  {/* Не больше трёх точек: ячейка 50px шириной, три точки по 6px
+                      с зазорами укладываются в 22px. */}
+                  {dayEntries.length > 0 && (
+                    <span className="flex gap-0.5">
+                      {dayEntries.slice(0, 3).map((e) => (
+                        <span
+                          key={e.id}
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: dayTypeById.get(e.day_type_id)?.color }}
+                        />
+                      ))}
+                    </span>
+                  )}
+                  {dayHours > 0 && (
+                    <span className="text-[10px] text-white/50">
+                      {dayHours}
+                      {ru.calendar.hoursShort}
+                    </span>
+                  )}
                 </button>
               );
             })}
