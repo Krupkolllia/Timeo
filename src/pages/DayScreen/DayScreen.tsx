@@ -3,9 +3,14 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
 import { NumberInput } from "@/components/NumberInput";
 import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } from "@/db/entries";
-import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
+import {
+  applyMultiplierEdit,
+  applyRateEdit,
+  buildEntryDefaultsForDayType,
+  calculateEntryAmount,
+  type EntryDefaults,
+} from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
-import { roundMultiplier } from "@/lib/calc/round";
 import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
@@ -274,50 +279,20 @@ export function DayScreen({
     void persist({ ...draft, hours, amount, rate_per_hour });
   }
 
+  // Само правило связи множителя и ставки живёт в lib/calc/entry: оно уже
+  // ломалось дважды (стирало ставку при нулевой базовой), а компонент тестами
+  // не покрыт.
   function handleMultiplierChange(multiplier: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Раздел 3 ТЗ: правка множителя переводит ставку в авто-режим и пересчитывает
-    // её из base_rate периода — источник истины всегда base_rate × multiplier.
-    const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, multiplier, rate_is_manual: false },
-      dayType,
-      period,
-    );
-    // rate_source по-прежнему выводится из правила раздела 6.2: если введённое
-    // значение совпадает с тем, что дало бы авто-правило (праздник/выходной/тип
-    // дня), считаем его тем же источником; иначе это уже не привязано ни к
-    // какому правилу, и ближайшее по смыслу значение — "ставка периода".
     const auto = resolveMultiplier(parsedDate, dayType, holiday, settings.weekend_multipliers);
-    const rate_source = mapRateSource(auto.value === multiplier ? auto.source : "default", false);
-    void persist({ ...draft, multiplier, rate_is_manual: false, rate_per_hour, amount, rate_source });
+    void persist({ ...draft, ...applyMultiplierEdit(draft, multiplier, dayType, period, auto) });
   }
 
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Раздел 3 ТЗ: поля связаны в обе стороны. Ставка, введённая руками, задаёт
-    // множитель = ставка / базовая ставка периода — иначе на экране остаётся пара
-    // «×2 и 50 zł», которая при base_rate 33.3 не может быть верной одновременно.
-    // При базовой ставке 0 делить не на что — множитель оставляем как есть.
-    const multiplier = period.base_rate !== 0 ? roundMultiplier(rate / period.base_rate) : draft.multiplier;
-    // rate_is_manual=true сохраняется: по разделу 6.1 вписанная пользователем
-    // ставка перестаёт зависеть от base_rate, и calculateEntryAmount возьмёт
-    // именно её, а не пересчитает из множителя. Множитель здесь — производное
-    // значение для отображения и истории.
-    const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, multiplier, rate_per_hour: rate, rate_is_manual: true },
-      dayType,
-      period,
-    );
-    void persist({
-      ...draft,
-      multiplier,
-      rate_is_manual: true,
-      rate_per_hour,
-      amount,
-      rate_source: mapRateSource("default", true),
-    });
+    void persist({ ...draft, ...applyRateEdit(draft, rate, dayType, period) });
   }
 
   function handleNoteChange(note: string) {

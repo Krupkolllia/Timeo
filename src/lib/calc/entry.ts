@@ -1,6 +1,6 @@
 import type { DayType, Entry, Holiday, Period, RateSource, WeekendMultipliers } from "@/types/models";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
-import { roundMoney } from "@/lib/calc/round";
+import { roundMoney, roundMultiplier } from "@/lib/calc/round";
 
 /**
  * Раздел 6.1 ТЗ. amount_override побеждает всё остальное; иначе расчёт зависит
@@ -106,4 +106,83 @@ export function buildEntryDefaultsForDayType(
     rate_source: mapRateSource(multiplierResult.source, rate_is_manual),
     multiplier_source: multiplierResult.source,
   };
+}
+
+/** Связанные поля записи после правки множителя или ставки (раздел 5.3.1). */
+export interface LinkedFieldsResult {
+  multiplier: number;
+  rate_per_hour: number;
+  rate_is_manual: boolean;
+  amount: number;
+  rate_source: RateSource;
+}
+
+type LinkedFieldsEntry = Pick<
+  Entry,
+  "hours" | "multiplier" | "rate_per_hour" | "rate_is_manual" | "amount_override" | "rate_source"
+>;
+
+/**
+ * Пользователь правит МНОЖИТЕЛЬ (раздел 5.3.1: поля связаны в обе стороны).
+ * Ставка возвращается в авто-режим и выводится из base_rate × multiplier —
+ * источник истины всегда базовая ставка периода.
+ *
+ * Кроме нулевой базовой ставки. Произведение тогда всегда 0, и авто-режим
+ * стирал бы ставку, вписанную руками: набрал 50, поправил множитель — в поле
+ * ноль. Выводить ставку не из чего, поэтому она остаётся как есть, ровно как
+ * applyRateEdit оставляет множитель, когда делить не на что. Это та же
+ * ситуация, что и в инварианте 22: при base_rate = 0 связь между полями
+ * разорвана, и авторитетно то поле, которое заполнил человек.
+ */
+export function applyMultiplierEdit(
+  entry: LinkedFieldsEntry,
+  multiplier: number,
+  dayType: Pick<DayType, "pay_mode" | "fixed_amount">,
+  period: Pick<Period, "base_rate">,
+  auto: MultiplierResult,
+): LinkedFieldsResult {
+  const canDeriveRate = period.base_rate !== 0;
+  const rate_is_manual = canDeriveRate ? false : entry.rate_is_manual;
+  const { amount, rate_per_hour } = calculateEntryAmount(
+    { ...entry, multiplier, rate_is_manual },
+    dayType,
+    period,
+  );
+
+  // rate_source выводится из правила раздела 6.2: если введённое значение
+  // совпадает с тем, что дало бы авто-правило (праздник/выходной/тип дня),
+  // считаем его тем же источником; иначе это уже не привязано ни к какому
+  // правилу, и ближайшее по смыслу значение — «ставка периода». При нулевой
+  // базовой ставке ставку мы не трогали, значит и её происхождение прежнее.
+  const rate_source = canDeriveRate
+    ? mapRateSource(auto.value === multiplier ? auto.source : "default", false)
+    : entry.rate_source;
+
+  return { multiplier, rate_per_hour, rate_is_manual, amount, rate_source };
+}
+
+/**
+ * Пользователь правит СТАВКУ. Она задаёт множитель = ставка / базовая ставка
+ * периода — иначе на экране остаётся пара «×2 и 50 zł», которая при base_rate
+ * 33.3 не может быть верной одновременно. При базовой ставке 0 делить не на
+ * что, множитель остаётся как есть.
+ *
+ * rate_is_manual становится true: по разделу 6.3 вписанная человеком ставка
+ * перестаёт зависеть от base_rate, и calculateEntryAmount возьмёт именно её.
+ * Множитель здесь — производное значение для отображения и истории.
+ */
+export function applyRateEdit(
+  entry: LinkedFieldsEntry,
+  rate: number,
+  dayType: Pick<DayType, "pay_mode" | "fixed_amount">,
+  period: Pick<Period, "base_rate">,
+): LinkedFieldsResult {
+  const multiplier = period.base_rate !== 0 ? roundMultiplier(rate / period.base_rate) : entry.multiplier;
+  const { amount, rate_per_hour } = calculateEntryAmount(
+    { ...entry, multiplier, rate_per_hour: rate, rate_is_manual: true },
+    dayType,
+    period,
+  );
+
+  return { multiplier, rate_per_hour, rate_is_manual: true, amount, rate_source: mapRateSource("default", true) };
 }

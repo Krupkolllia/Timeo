@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildEntryDefaultsForDayType, calculateEntryAmount } from "@/lib/calc/entry";
+import {
+  applyMultiplierEdit,
+  applyRateEdit,
+  buildEntryDefaultsForDayType,
+  calculateEntryAmount,
+} from "@/lib/calc/entry";
 import type { DayType } from "@/types/models";
 
 const period = { base_rate: 20 };
@@ -180,5 +185,121 @@ describe("buildEntryDefaultsForDayType", () => {
     // подписывается как множитель типа дня — см. resolveMultiplier.
     expect(result.multiplier_source).toBe("default");
     expect(result.rate_source).toBe("period_base");
+  });
+});
+
+// --- Раздел 5.3.1: множитель и ставка связаны в обе стороны -------------------
+
+const hourly = makeDayType();
+const autoDefault = { value: 1, source: "default" } as const;
+
+function makeLinked(overrides: Partial<Parameters<typeof applyMultiplierEdit>[0]> = {}) {
+  return {
+    hours: 8,
+    multiplier: 1,
+    rate_per_hour: 0,
+    rate_is_manual: false,
+    amount_override: null,
+    rate_source: "period_base" as const,
+    ...overrides,
+  };
+}
+
+describe("applyMultiplierEdit", () => {
+  it("пересчитывает ставку из базовой ставки периода и возвращает её в авто-режим", () => {
+    const entry = makeLinked({ rate_per_hour: 50, rate_is_manual: true, rate_source: "manual" });
+
+    const result = applyMultiplierEdit(entry, 2, hourly, { base_rate: 20 }, autoDefault);
+
+    expect(result.rate_per_hour).toBe(40);
+    expect(result.rate_is_manual).toBe(false);
+    expect(result.amount).toBe(320);
+  });
+
+  it("не обнуляет ставку, введённую вручную, когда базовая ставка периода равна нулю", () => {
+    // Регрессия: пользователь набрал ставку 50 на периоде без базовой ставки,
+    // затем поправил множитель — ставка обнулялась, потому что авто-режим
+    // считал её как 0 × multiplier.
+    const entry = makeLinked({ rate_per_hour: 50, rate_is_manual: true, rate_source: "manual" });
+
+    const result = applyMultiplierEdit(entry, 2, hourly, { base_rate: 0 }, autoDefault);
+
+    expect(result.rate_per_hour).toBe(50);
+    expect(result.rate_is_manual).toBe(true);
+    expect(result.rate_source).toBe("manual");
+    expect(result.multiplier).toBe(2);
+    expect(result.amount).toBe(400);
+  });
+
+  it("при нулевой базовой ставке не переводит авто-ставку в ручную", () => {
+    // Иначе запись навсегда выпала бы из пересчёта по инварианту 9, и заданная
+    // позже базовая ставка периода до неё уже не дошла бы.
+    const result = applyMultiplierEdit(makeLinked(), 2, hourly, { base_rate: 0 }, autoDefault);
+
+    expect(result.rate_is_manual).toBe(false);
+    expect(result.rate_per_hour).toBe(0);
+  });
+
+  it("подписывает источник авто-правилом, когда значение совпало с ним", () => {
+    const auto = { value: 2, source: "sunday" } as const;
+
+    const result = applyMultiplierEdit(makeLinked(), 2, hourly, { base_rate: 20 }, auto);
+
+    expect(result.rate_source).toBe("weekend_rule");
+  });
+
+  it("подписывает источник ставкой периода, когда значение задано вручную", () => {
+    const auto = { value: 2, source: "sunday" } as const;
+
+    const result = applyMultiplierEdit(makeLinked(), 1.7, hourly, { base_rate: 20 }, auto);
+
+    expect(result.rate_source).toBe("period_base");
+  });
+
+  it("не трогает сумму записи с ручной суммой (инвариант 8)", () => {
+    const entry = makeLinked({ amount_override: 999 });
+
+    const result = applyMultiplierEdit(entry, 3, hourly, { base_rate: 20 }, autoDefault);
+
+    expect(result.amount).toBe(999);
+  });
+});
+
+describe("applyRateEdit", () => {
+  it("выводит множитель из ставки и базовой ставки периода", () => {
+    const result = applyRateEdit(makeLinked(), 40, hourly, { base_rate: 20 });
+
+    expect(result.multiplier).toBe(2);
+    expect(result.rate_per_hour).toBe(40);
+    expect(result.rate_is_manual).toBe(true);
+    expect(result.rate_source).toBe("manual");
+    expect(result.amount).toBe(320);
+  });
+
+  it("оставляет множитель как есть, когда базовая ставка равна нулю", () => {
+    const result = applyRateEdit(makeLinked({ multiplier: 1.5 }), 50, hourly, { base_rate: 0 });
+
+    expect(result.multiplier).toBe(1.5);
+    expect(result.rate_per_hour).toBe(50);
+    expect(result.amount).toBe(400);
+  });
+
+  it("округляет множитель до тысячных, а не тащит хвост деления", () => {
+    const result = applyRateEdit(makeLinked(), 50, hourly, { base_rate: 33.3 });
+
+    expect(result.multiplier).toBe(1.502);
+  });
+
+  it("ставка и обратно множитель переживают круговой обход без потери значения", () => {
+    const afterRate = applyRateEdit(makeLinked(), 40, hourly, { base_rate: 20 });
+    const afterMultiplier = applyMultiplierEdit(
+      { ...makeLinked(), ...afterRate },
+      afterRate.multiplier,
+      hourly,
+      { base_rate: 20 },
+      autoDefault,
+    );
+
+    expect(afterMultiplier.rate_per_hour).toBe(40);
   });
 });
