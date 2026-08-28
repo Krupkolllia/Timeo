@@ -195,7 +195,7 @@ export function CalendarPage() {
         </p>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
         <div className="text-xs text-white/50">
           {ru.calendar.remainingToNorm}: {totals ? totals.remaining_to_norm : "—"} {ru.calendar.hoursShort}
         </div>
@@ -239,10 +239,20 @@ export function CalendarPage() {
         </div>
       )}
 
+      {/* Плашка отмены живёт сверху, а не над панелью итогов: низ занят самым
+          важным элементом интерфейса (раздел 7.1), и любое размещение над ним
+          либо перекрывает три показателя ровно на те 5 секунд, когда
+          пользователь смотрит на изменившийся итог, либо двигает их вверх и
+          даёт скачок вёрстки. */}
       {pendingUndo && (
-        <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] z-30 flex items-center justify-between rounded-xl bg-slate-800 px-4 py-3 shadow-lg">
+        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
           <span className="text-sm">{ru.day.deletedNotice}</span>
-          <button className="text-sm font-semibold text-app-accent" onClick={handleUndoDelete}>
+          {/* min-h-11 поднимает область нажатия до 44px (была 20px), -mr-2
+              компенсирует добавленный padding, чтобы плашка не растолстела. */}
+          <button
+            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent"
+            onClick={handleUndoDelete}
+          >
             {ru.day.undo}
           </button>
         </div>
