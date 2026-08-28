@@ -13,8 +13,8 @@ describe("TimeoDB schema migration", () => {
   it("upgrades a pre-existing v1 database (no compound period index) without erroring", async () => {
     dbName = `timeo-test-${crypto.randomUUID()}`;
 
-    // Признаёт форму схемы, задеплоенной ещё в Блоке 0 — до того, как здесь
-    // появился составной индекс [user_id+year+month].
+    // Reproduces the schema shape deployed back in Block 0 — before the
+    // compound index [user_id+year+month] existed here.
     const legacy = new Dexie(dbName);
     legacy.version(1).stores({
       settings: "id, user_id",

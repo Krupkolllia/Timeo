@@ -17,10 +17,10 @@ export class TimeoDB extends Dexie {
       entries: "id, user_id, date, day_type_id",
       holidays: "id, user_id, date",
     });
-    // Блок 0 уже был задеплоен на прод — на устройствах, открывавших приложение
-    // раньше, IndexedDB уже создана на version(1) без этого индекса. Dexie
-    // применяет изменения stores() только при увеличении номера версии, поэтому
-    // индекс добавляется отдельной version(2), а не правкой version(1).
+    // Block 0 was already deployed to prod — on devices that opened the app
+    // before, IndexedDB was already created at version(1) without this index. Dexie
+    // only applies stores() changes when the version number increases, so the
+    // index is added as a separate version(2) instead of editing version(1).
     this.version(2).stores({
       periods: "id, user_id, [year+month], [user_id+year+month]",
     });

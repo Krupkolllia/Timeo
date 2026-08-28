@@ -14,8 +14,8 @@ function startOfWeekMonday(date: Date): Date {
 }
 
 /**
- * Полные недели (пн-вс), покрывающие [start, end] — сетка календаря дополняется
- * днями соседних периодов, чтобы не резать неделю посередине.
+ * Full weeks (Mon-Sun) covering [start, end] — the calendar grid is padded
+ * with days from adjacent periods so a week is never cut in the middle.
  */
 export function buildWeeks(start: Date, end: Date): Date[][] {
   const gridStart = startOfWeekMonday(start);

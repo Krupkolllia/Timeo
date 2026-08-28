@@ -17,8 +17,8 @@ type PresetDayType = Pick<
   | "sort_order"
 >;
 
-// Раздел 5.3 ТЗ. ignore_auto_multipliers=true у отпуска/больничного/отгула —
-// иначе выходной, выпавший на отпуск, внезапно оплатился бы по множителю выходного.
+// Section 5.3 of the spec. ignore_auto_multipliers=true for vacation/sick leave/day off —
+// otherwise a day-off that falls on vacation would suddenly get paid at the day-off multiplier.
 export const PRESET_DAY_TYPES: PresetDayType[] = [
   {
     name: "Рабочий день",
@@ -107,9 +107,9 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
 ];
 
 export async function ensureDayTypesSeeded(db: TimeoDB, userId: string): Promise<void> {
-  // rw-транзакция делает check-then-insert атомарным: без неё два параллельных
-  // вызова (например, двойной вызов эффекта в React StrictMode) оба видят
-  // пустую таблицу и каждый досеивает свой набор пресетов — дубликаты.
+  // The rw transaction makes check-then-insert atomic: without it, two parallel
+  // calls (e.g. a double effect invocation in React StrictMode) would both see
+  // an empty table and each would seed its own set of presets — duplicates.
   return db.transaction("rw", db.day_types, async () => {
     const existing = await db.day_types.where("user_id").equals(userId).count();
     if (existing > 0) return;

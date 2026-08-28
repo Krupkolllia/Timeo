@@ -1,10 +1,10 @@
 # Supabase SQL
 
-Схема и RLS-политики для блока 7 («Облако»). Пока пусто — наполняется, когда доходит очередь
-до синхронизации (раздел 4 и 5 TIMEO-SPEC.md).
+Schema and RLS policies for block 7 ("Cloud"). Currently empty — gets filled in when it's
+sync's turn (sections 4 and 5 of TIMEO-SPEC.md).
 
-Схема Postgres должна повторять локальную схему Dexie (`src/db/schema.ts`): те же таблицы,
-те же поля, `id/user_id/created_at/updated_at/deleted_at` на каждой. Row Level Security — по
-`user_id`. Разрешение конфликтов — последняя запись побеждает по `updated_at`.
+The Postgres schema should mirror the local Dexie schema (`src/db/schema.ts`): the same tables,
+the same fields, `id/user_id/created_at/updated_at/deleted_at` on each. Row Level Security is by
+`user_id`. Conflict resolution — last write wins by `updated_at`.
 
-Файлы этой папки исполняются вручную в Supabase SQL Editor (см. `TIMEO-SETUP.md`, шаг 4).
+The files in this folder are run manually in the Supabase SQL Editor (see `TIMEO-SETUP.md`, step 4).

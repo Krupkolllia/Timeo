@@ -1,4 +1,4 @@
 # keepalive-worker
 
-Cloudflare Worker для блока 9. Cron-триггер раз в сутки делает запрос к Supabase, чтобы
-бесплатный проект не засыпал через неделю бездействия (раздел 4 TIMEO-SPEC.md, "Keep-alive").
+Cloudflare Worker for block 9. A cron trigger once a day makes a request to Supabase so the
+free project doesn't go to sleep after a week of inactivity (section 4 of TIMEO-SPEC.md, "Keep-alive").
