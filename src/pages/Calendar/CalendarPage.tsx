@@ -8,6 +8,7 @@ import {
   calculatePeriodTotals,
   getAdjacentPeriod,
   getPeriodDateRange,
+  getPeriodIdentityFromLabel,
   getPeriodLabel,
   periodForDate,
   type PeriodId,
@@ -167,10 +168,10 @@ export function CalendarPage() {
 
       {pickerOpen && (
         <MonthYearPicker
-          year={viewed.year}
-          month={viewed.month}
+          year={label.year}
+          month={label.month}
           onSelect={(next) => {
-            setViewed(next);
+            setViewed(getPeriodIdentityFromLabel(next.year, next.month, settings.period_start_day, settings.period_naming));
             setPickerOpen(false);
           }}
           onClose={() => setPickerOpen(false)}

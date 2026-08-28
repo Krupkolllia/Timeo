@@ -96,3 +96,20 @@ export function getPeriodLabel(year: number, month: number, periodStartDay: numb
   const { end } = getPeriodDateRange(year, month, periodStartDay);
   return { year: end.getFullYear(), month: end.getMonth() + 1 };
 }
+
+/**
+ * Обратная к getPeriodLabel — превращает выбранную пользователем подпись
+ * (например, месяц в пикере, где он видит именно label, а не идентификатор)
+ * обратно в идентификатор периода. Нужна, чтобы UI, показывающий label,
+ * не путал его с year/month из periods, когда period_naming = "end_month".
+ */
+export function getPeriodIdentityFromLabel(
+  labelYear: number,
+  labelMonth: number,
+  periodStartDay: number,
+  periodNaming: PeriodNaming,
+): PeriodId {
+  if (periodNaming === "start_month" || periodStartDay === 1) return { year: labelYear, month: labelMonth };
+
+  return getAdjacentPeriod(labelYear, labelMonth, -1);
+}

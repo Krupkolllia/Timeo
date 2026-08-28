@@ -3,6 +3,7 @@ import {
   calculatePeriodTotals,
   getAdjacentPeriod,
   getPeriodDateRange,
+  getPeriodIdentityFromLabel,
   getPeriodLabel,
   periodForDate,
 } from "@/lib/calc/period";
@@ -70,6 +71,25 @@ describe("getPeriodLabel", () => {
 
   it("has no effect when period_start_day is 1 (start and end month coincide)", () => {
     expect(getPeriodLabel(2026, 3, 1, "end_month")).toEqual({ year: 2026, month: 3 });
+  });
+});
+
+describe("getPeriodIdentityFromLabel", () => {
+  it("round-trips with getPeriodLabel for start_month naming", () => {
+    const identity = { year: 2026, month: 8 };
+    const label = getPeriodLabel(identity.year, identity.month, 15, "start_month");
+    expect(getPeriodIdentityFromLabel(label.year, label.month, 15, "start_month")).toEqual(identity);
+  });
+
+  it("round-trips with getPeriodLabel for end_month naming across a year boundary", () => {
+    const identity = { year: 2026, month: 12 };
+    const label = getPeriodLabel(identity.year, identity.month, 15, "end_month");
+    expect(label).toEqual({ year: 2027, month: 1 });
+    expect(getPeriodIdentityFromLabel(label.year, label.month, 15, "end_month")).toEqual(identity);
+  });
+
+  it("is a no-op when period_start_day is 1, matching getPeriodLabel", () => {
+    expect(getPeriodIdentityFromLabel(2026, 3, 1, "end_month")).toEqual({ year: 2026, month: 3 });
   });
 });
 
