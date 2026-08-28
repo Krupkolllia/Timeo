@@ -45,9 +45,9 @@ export function calculatePeriodTotals(
 }
 
 /**
- * Периоды не хранят ссылку на дату — идентификатор периода (year/month) всегда
- * вычисляется заново. Идентификатор всегда привязан к месяцу, в котором период
- * начинается (period_naming влияет только на отображаемую подпись, см. getPeriodLabel).
+ * Periods don't store a reference to a date — the period identifier (year/month) is always
+ * recomputed. The identifier is always tied to the month in which the period
+ * starts (period_naming affects only the displayed label, see getPeriodLabel).
  */
 export function periodForDate(date: Date, periodStartDay: number): PeriodId {
   const calendarYear = date.getFullYear();
@@ -87,8 +87,8 @@ export function getAdjacentPeriod(year: number, month: number, delta: number): P
 }
 
 /**
- * period_naming определяет только подпись периода в интерфейсе, не его идентификатор:
- * иначе переключение настройки задним числом переносило бы записи между строками periods.
+ * period_naming determines only the period's label in the UI, not its identifier:
+ * otherwise flipping the setting retroactively would move records between rows of periods.
  */
 export function getPeriodLabel(year: number, month: number, periodStartDay: number, periodNaming: PeriodNaming): PeriodId {
   if (periodNaming === "start_month") return { year, month };
@@ -98,10 +98,10 @@ export function getPeriodLabel(year: number, month: number, periodStartDay: numb
 }
 
 /**
- * Обратная к getPeriodLabel — превращает выбранную пользователем подпись
- * (например, месяц в пикере, где он видит именно label, а не идентификатор)
- * обратно в идентификатор периода. Нужна, чтобы UI, показывающий label,
- * не путал его с year/month из periods, когда period_naming = "end_month".
+ * Inverse of getPeriodLabel — turns a label chosen by the user
+ * (e.g. the month in the picker, where they see the label, not the identifier)
+ * back into a period identifier. Needed so that UI showing the label
+ * doesn't confuse it with the year/month from periods when period_naming = "end_month".
  */
 export function getPeriodIdentityFromLabel(
   labelYear: number,

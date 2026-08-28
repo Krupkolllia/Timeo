@@ -1,8 +1,8 @@
 # reminder-worker
 
-Cloudflare Worker для блока 8 («Уведомления»). Cron-триггер раз в час; для каждого пользователя
-с включёнными напоминаниями проверяет в Supabase, заполнен ли сегодняшний день, и шлёт Web Push,
-если нет (раздел 4 TIMEO-SPEC.md, "Уведомления").
+Cloudflare Worker for block 8 ("Notifications"). A cron trigger once an hour; for each user
+with reminders enabled, checks in Supabase whether today's day is filled in and sends a Web Push
+if not (section 4 of TIMEO-SPEC.md, "Notifications").
 
-Работает только для авторизованных пользователей с активной push-подпиской — без аккаунта
-серверу неоткуда узнать адрес устройства.
+Works only for authenticated users with an active push subscription — without an account the
+server has no way to know the device address.

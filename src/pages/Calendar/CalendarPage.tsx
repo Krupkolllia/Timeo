@@ -31,7 +31,7 @@ export function CalendarPage() {
     void bootstrapUser(db, userId);
   }, []);
 
-  // Период вычисляется из period_start_day настроек, поэтому ждём их загрузки.
+  // The period is computed from settings' period_start_day, so we wait for it to load.
   useEffect(() => {
     if (settings && viewed === null) {
       setViewed(periodForDate(new Date(), settings.period_start_day));
@@ -46,9 +46,9 @@ export function CalendarPage() {
   useEffect(() => {
     if (!viewed || !settings) return;
     void getOrCreatePeriod(db, userId, viewed.year, viewed.month, settings);
-    // Зависим от конкретных полей, а не от объекта settings целиком — иначе
-    // любая несвязанная правка настроек (например, темы) меняет ссылку и
-    // лишний раз перезапускает поиск/создание периода.
+    // We depend on specific fields rather than the whole settings object — otherwise
+    // any unrelated settings edit (e.g. the theme) changes the reference and
+    // needlessly re-triggers the period lookup/creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewed, settings?.default_base_rate, settings?.default_norm_hours]);
 
@@ -60,9 +60,9 @@ export function CalendarPage() {
     [viewed],
   );
 
-  // Архивные типы дней остаются в этой карте: они всё ещё могут быть проставлены
-  // на прошлых днях, и итог периода должен продолжать считать их часы верно.
-  // Фильтровать is_archived нужно только там, где пользователь выбирает тип дня.
+  // Archived day types stay in this map: they may still be assigned
+  // on past days, and the period total must keep counting their hours correctly.
+  // Filtering out is_archived is only needed where the user picks a day type.
   const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).sortBy("sort_order"), []);
 
   const entries = useLiveQuery(async () => {

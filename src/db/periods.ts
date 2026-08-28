@@ -7,10 +7,10 @@ function findPeriod(db: TimeoDB, userId: string, year: number, month: number) {
 }
 
 /**
- * Раздел 5.2 ТЗ — механика изоляции периодов. При первом обращении к периоду
- * значения base_rate/norm_hours КОПИРУЮТСЯ из предыдущего периода (не ссылка),
- * поэтому правки в одном периоде физически не могут задеть другой. Если
- * предыдущего периода нет — берутся default_base_rate/default_norm_hours из настроек.
+ * Section 5.2 of the spec — the period isolation mechanism. On first access to a period,
+ * the base_rate/norm_hours values are COPIED from the previous period (not referenced),
+ * so edits in one period physically cannot affect another. If there is no
+ * previous period, default_base_rate/default_norm_hours are taken from settings.
  */
 export async function getOrCreatePeriod(
   db: TimeoDB,
@@ -19,9 +19,9 @@ export async function getOrCreatePeriod(
   month: number,
   settings: Pick<Settings, "default_base_rate" | "default_norm_hours">,
 ): Promise<Period> {
-  // Читаем и создаём в одной rw-транзакции: без этого два параллельных вызова
-  // (например, повторный вызов эффекта в React StrictMode) оба не находят
-  // период и создают по строке каждый, дублируя period на один year+month.
+  // Read and create in a single rw transaction: without this, two parallel calls
+  // (e.g. a repeated effect invocation in React StrictMode) would both fail to find
+  // the period and each would create its own row, duplicating the period for one year+month.
   return db.transaction("rw", db.periods, async () => {
     const existing = await findPeriod(db, userId, year, month);
     if (existing) return existing;

@@ -9,8 +9,8 @@ interface MonthYearPickerProps {
 }
 
 export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPickerProps) {
-  // Год листается внутри пикера и подтверждается только тапом по месяцу —
-  // иначе стрелки года сразу закрывали бы пикер и переключали период.
+  // The year is paged through inside the picker and only confirmed by tapping a month —
+  // otherwise the year arrows would immediately close the picker and switch the period.
   const [displayYear, setDisplayYear] = useState(year);
 
   return (
