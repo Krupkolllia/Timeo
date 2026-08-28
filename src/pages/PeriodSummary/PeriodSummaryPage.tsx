@@ -1,3 +1,402 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { db } from "@/db/db";
+import { getLocalUserId } from "@/db/localUser";
+import { applyBaseRateChange, closePeriod, getOrCreatePeriod, reopenPeriod, updatePeriod } from "@/db/periods";
+import { NumberInput } from "@/components/NumberInput";
+import { RateChangeDialog } from "@/pages/PeriodSummary/RateChangeDialog";
+import {
+  calculatePeriodTotals,
+  getPeriodDateRange,
+  getPeriodLabel,
+  periodForDate,
+  type PeriodId,
+} from "@/lib/calc/period";
+import { toISODate } from "@/lib/calc/calendarGrid";
+import { formatDayShort } from "@/lib/format/date";
+import { formatEntryDetail } from "@/lib/format/entry";
+import { ru } from "@/i18n/ru";
+import type { RateChangeMode } from "@/types/models";
+
+const userId = getLocalUserId();
+
+function parsePeriodParam(value: string | null, min: number, max: number): number | null {
+  if (value === null || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return parsed >= min && parsed <= max ? parsed : null;
+}
+
 export function PeriodSummaryPage() {
-  return <div className="min-h-dvh bg-app-bg text-white" />;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
+  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).toArray(), []);
+
+  const [rateDialogOpen, setRateDialogOpen] = useState(false);
+  const [reopenConfirmOpen, setReopenConfirmOpen] = useState(false);
+  const [recalculatedCount, setRecalculatedCount] = useState<number | null>(null);
+  const recalculatedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Период приходит из query-параметров: экран открывается тапом по панели
+  // итогов календаря, и «текущий» для календаря и для этого экрана — разные
+  // вещи, стоит пролистать месяц назад. Без параметров (прямой заход по
+  // ссылке или восстановление PWA) берём период сегодняшнего дня.
+  //
+  // Зависимость — на само число period_start_day, а не на объект settings:
+  // применение новой ставки пишет preferred_rate_change_mode, объект settings
+  // меняет ссылку, следом менялись бы viewed и range, useLiveQuery по записям
+  // пересоздавался бы и на кадр отдавал undefined — расшифровка мигала бы
+  // строкой «за этот период записей нет» ровно после пересчёта.
+  const periodStartDay = settings?.period_start_day;
+
+  const viewed = useMemo<PeriodId | null>(() => {
+    const year = parsePeriodParam(searchParams.get("year"), 1970, 9999);
+    const month = parsePeriodParam(searchParams.get("month"), 1, 12);
+    if (year !== null && month !== null) return { year, month };
+    return periodStartDay === undefined ? null : periodForDate(new Date(), periodStartDay);
+  }, [searchParams, periodStartDay]);
+
+  const range = useMemo(
+    () =>
+      viewed && periodStartDay !== undefined
+        ? getPeriodDateRange(viewed.year, viewed.month, periodStartDay)
+        : null,
+    [viewed, periodStartDay],
+  );
+
+  useEffect(() => {
+    if (!viewed || !settings) return;
+    void getOrCreatePeriod(db, userId, viewed.year, viewed.month, settings);
+    // Как и в календаре, зависим от конкретных полей: правка темы не должна
+    // перезапускать поиск/создание периода.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours]);
+
+  const period = useLiveQuery(
+    () =>
+      viewed
+        ? db.periods.where("[user_id+year+month]").equals([userId, viewed.year, viewed.month]).first()
+        : undefined,
+    [viewed],
+  );
+
+  const entries = useLiveQuery(async () => {
+    if (!range) return [];
+    const rows = await db.entries
+      .where("date")
+      .between(toISODate(range.start), toISODate(range.end), true, true)
+      .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
+      .toArray();
+    // Порядок по индексу date гарантирован не полностью, а внутри одного дня —
+    // не гарантирован вовсе: расшифровка не должна переставлять строки между
+    // перечитываниями (раздел 5.4 допускает несколько записей на день).
+    return rows.sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at));
+  }, [range]);
+
+  const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
+
+  const totals = useMemo(
+    () => (period ? calculatePeriodTotals(period, entries ?? [], dayTypeById) : null),
+    [period, entries, dayTypeById],
+  );
+
+  // Черновик базовой ставки: единственное поле, которое не пишется сразу —
+  // раздел 6.6 требует диалога с выбором режима.
+  //
+  // null означает «черновика нет, показываем ставку периода», а не «ноль»:
+  // инициализация черновика из эффекта дала бы кадр, в котором период уже
+  // загружен, а черновик ещё равен нулю — поле мигало бы нулём и кнопкой
+  // «сохранить ставку». Эффект ниже только сбрасывает черновик, когда значение
+  // в базе действительно изменилось (наш же пересчёт) или сменился период.
+  const [rateDraft, setRateDraft] = useState<number | null>(null);
+  const syncedRateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!period) return;
+    const key = `${period.id}:${period.base_rate}`;
+    if (syncedRateRef.current === key) return;
+    syncedRateRef.current = key;
+    setRateDraft(null);
+  }, [period]);
+
+  // Комментарий к extra_amount — тоже черновик (по той же причине, что и
+  // ставка), и сбрасывается только при смене периода: иначе эхо собственной
+  // записи из Dexie перетирало бы набранное.
+  const [noteDraft, setNoteDraft] = useState<string | null>(null);
+  const syncedNoteRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!period || syncedNoteRef.current === period.id) return;
+    syncedNoteRef.current = period.id;
+    setNoteDraft(null);
+  }, [period]);
+
+  useEffect(() => {
+    return () => {
+      if (recalculatedTimeoutRef.current) clearTimeout(recalculatedTimeoutRef.current);
+    };
+  }, []);
+
+  function handleBack() {
+    // В standalone-режиме браузерной кнопки «назад» нет, а history может быть
+    // пустой (прямой заход, восстановление PWA) — тогда navigate(-1) никуда не
+    // ведёт и экран замирает.
+    if (location.key === "default") navigate("/");
+    else navigate(-1);
+  }
+
+  async function handleApplyRate(mode: RateChangeMode, fromDateISO: string | null) {
+    if (!viewed || !settings) return;
+    setRateDialogOpen(false);
+    const result = await applyBaseRateChange(db, userId, {
+      year: viewed.year,
+      month: viewed.month,
+      newBaseRate: rateDraft ?? period?.base_rate ?? 0,
+      mode,
+      fromDateISO,
+      periodStartDay: settings.period_start_day,
+    });
+    if (mode === "apply_next_period") {
+      // Текущий период не изменился — возвращаем поле к его собственной ставке,
+      // иначе на экране осталось бы число, которого в этом месяце нет.
+      setRateDraft(null);
+      return;
+    }
+    if (recalculatedTimeoutRef.current) clearTimeout(recalculatedTimeoutRef.current);
+    setRecalculatedCount(result.updatedEntries);
+    recalculatedTimeoutRef.current = setTimeout(() => setRecalculatedCount(null), 4000);
+  }
+
+  if (!settings || !viewed || !range || !period) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-white/50">{ru.calendar.loading}</div>
+    );
+  }
+
+  const label = getPeriodLabel(viewed.year, viewed.month, settings.period_start_day, settings.period_naming);
+  const isClosed = period.is_closed;
+  const rateValue = rateDraft ?? period.base_rate;
+  const rateChanged = rateValue !== period.base_rate;
+
+  return (
+    // h-dvh, а не min-h-dvh: без ограниченной высоты у flex-родителя
+    // overflow-y-auto на списке не срабатывает, скроллится документ целиком, и
+    // на месяце из 26 записей кнопка «назад» уезжает за верхний край — вернуться
+    // можно только пролистав весь список обратно.
+    <div className="flex h-dvh flex-col bg-app-bg text-white">
+      <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
+        <button
+          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
+          onClick={handleBack}
+          aria-label={ru.period.back}
+        >
+          ‹
+        </button>
+        <span className="text-lg font-semibold tracking-tight">
+          {ru.calendar.monthNames[label.month - 1]} {label.year}
+        </span>
+      </header>
+
+      {/* min-h-0 обязателен: без него flex-элемент не сжимается ниже своего
+          контента и overflow-y-auto остаётся бездействующим. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
+        {isClosed && (
+          <p className="rounded-xl bg-white/5 px-3 py-2 text-sm text-white/60">{ru.period.closedBanner}</p>
+        )}
+
+        <div>
+          <label className="text-xs text-white/50">{ru.period.baseRate}</label>
+          <div className="mt-1 flex items-center gap-2">
+            {/* min-w-0 — иначе длинное число распирает flex-строку и выталкивает
+                валюту с кнопкой за край экрана (инвариант 26). */}
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-white/5 px-2">
+              <NumberInput
+                disabled={isClosed}
+                className="min-w-0 flex-1 bg-transparent py-3 text-lg outline-none disabled:opacity-70"
+                value={rateValue}
+                onChange={setRateDraft}
+              />
+              <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+            </div>
+            {rateChanged && !isClosed && (
+              <button
+                className="min-h-11 shrink-0 rounded-lg bg-app-accent px-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                onClick={() => setRateDialogOpen(true)}
+              >
+                {ru.period.baseRateSave}
+              </button>
+            )}
+          </div>
+          <p className={`mt-1 text-xs text-white/40 ${rateValue === 0 ? "" : "invisible"}`}>
+            {ru.period.hintZeroBaseRate}
+          </p>
+          {/* Высота строки зарезервирована всегда: появляясь на 4 секунды, она
+              иначе сдвигает вниз весь экран и возвращает обратно. */}
+          <p className={`text-xs text-white/40 ${recalculatedCount === null ? "invisible" : ""}`}>
+            {ru.period.recalculatedNotice}: {recalculatedCount ?? 0}
+          </p>
+        </div>
+
+        <div>
+          <label className="text-xs text-white/50">{ru.period.normHours}</label>
+          <NumberInput
+            disabled={isClosed}
+            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg disabled:opacity-70"
+            value={period.norm_hours}
+            onChange={(norm_hours) => void updatePeriod(db, period.id, { norm_hours })}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-white/50">{ru.period.extraAmount}</label>
+          <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+            <NumberInput
+              disabled={isClosed}
+              className="min-w-0 flex-1 bg-transparent py-3 text-lg outline-none disabled:opacity-70"
+              value={period.extra_amount}
+              onChange={(extra_amount) => void updatePeriod(db, period.id, { extra_amount })}
+            />
+            <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+          </div>
+          <p className={`mt-1 text-xs text-white/40 ${period.extra_amount < 0 ? "" : "invisible"}`}>
+            {ru.period.hintNegativeExtra}
+          </p>
+          {/* Значение поля — локальный черновик, а не то, что вернул Dexie:
+              контролируемый input, чей value приходит из асинхронного хранилища,
+              на быстром наборе теряет символы и прыгает кареткой. Запись в базу
+              идёт параллельно, как persist() в экране дня. */}
+          <input
+            type="text"
+            disabled={isClosed}
+            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-sm disabled:opacity-70"
+            placeholder={ru.period.extraNotePlaceholder}
+            aria-label={ru.period.extraNote}
+            value={noteDraft ?? period.extra_note}
+            onChange={(event) => {
+              setNoteDraft(event.target.value);
+              void updatePeriod(db, period.id, { extra_note: event.target.value });
+            }}
+          />
+        </div>
+
+        <div>
+          <p className="text-xs text-white/50">{ru.period.breakdown}</p>
+          {(entries ?? []).length === 0 ? (
+            <p className="mt-2 text-sm text-white/40">{ru.period.noEntries}</p>
+          ) : (
+            <ul className="mt-2 flex flex-col divide-y divide-white/5">
+              {(entries ?? []).map((entry) => {
+                const dayType = dayTypeById.get(entry.day_type_id);
+                return (
+                  <li key={entry.id} className="flex items-start justify-between gap-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm">
+                        {formatDayShort(entry.date)} · {dayType?.name ?? "—"}
+                      </p>
+                      <p className="truncate text-xs text-white/40">{formatEntryDetail(entry, dayType?.pay_mode)}</p>
+                    </div>
+                    <span className="shrink-0 text-sm tabular-nums">{entry.amount.toFixed(2)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-white/5 px-3 py-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-white/50">{ru.period.total}</span>
+            <span className="text-2xl font-semibold tabular-nums">
+              {(totals?.amount ?? 0).toFixed(2)} {settings.currency}
+            </span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between text-sm text-white/50">
+            <span>{ru.period.hoursColumn}</span>
+            <span className="tabular-nums">
+              {totals?.total_hours ?? 0} {ru.calendar.hoursShort}
+            </span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between text-sm text-white/50">
+            <span>{ru.calendar.remainingToNorm}</span>
+            <span className="tabular-nums">
+              {totals?.remaining_to_norm ?? 0} {ru.calendar.hoursShort}
+            </span>
+          </div>
+          {/* Снимок остаётся видимым после переоткрытия (инвариант 3) — иначе
+              сравнить «до» и «после» правки нечем. */}
+          {!isClosed && period.closed_totals && (
+            <p className="mt-2 text-xs text-white/40">
+              {ru.period.snapshot}: {period.closed_totals.amount.toFixed(2)} {settings.currency}
+            </p>
+          )}
+        </div>
+
+        {isClosed ? (
+          <button
+            className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+            onClick={() => setReopenConfirmOpen(true)}
+          >
+            {ru.period.reopen}
+          </button>
+        ) : (
+          <button
+            className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+            onClick={() => void closePeriod(db, userId, viewed.year, viewed.month, settings.period_start_day)}
+          >
+            {ru.period.closePeriod}
+          </button>
+        )}
+      </div>
+
+      {rateDialogOpen && (
+        <RateChangeDialog
+          currentRate={period.base_rate}
+          newRate={rateValue}
+          currency={settings.currency}
+          preferredMode={settings.preferred_rate_change_mode}
+          periodStartISO={toISODate(range.start)}
+          periodEndISO={toISODate(range.end)}
+          todayISO={toISODate(new Date())}
+          onCancel={() => setRateDialogOpen(false)}
+          onApply={(mode, fromDateISO) => void handleApplyRate(mode, fromDateISO)}
+        />
+      )}
+
+      {/* Раздел 7.10: модальных подтверждений в приложении нет — кроме
+          переоткрытия закрытого периода (инвариант 3) и замены данных при
+          импорте. Это тот самый случай. */}
+      {reopenConfirmOpen && (
+        <div
+          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+          onClick={() => setReopenConfirmOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 text-white"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-base font-semibold">{ru.period.reopenConfirmTitle}</p>
+            <p className="mt-2 text-sm text-white/50">{ru.period.reopenConfirmBody}</p>
+            <div className="mt-4 flex gap-3">
+              <button
+                className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+                onClick={() => setReopenConfirmOpen(false)}
+              >
+                {ru.period.cancel}
+              </button>
+              <button
+                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                onClick={() => {
+                  setReopenConfirmOpen(false);
+                  void reopenPeriod(db, userId, viewed.year, viewed.month);
+                }}
+              >
+                {ru.period.reopenConfirmAction}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

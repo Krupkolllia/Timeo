@@ -72,7 +72,12 @@ export type RateSource =
   | "weekend_rule"
   | "holiday_rule"
   | "day_type_default"
-  | "manual";
+  | "manual"
+  // Раздел 6.6: ставка заморожена системой при смене базовой ставки «с даты».
+  // Отличается от "manual" (пользователь вписал число сам) только
+  // происхождением, но на экране расшифровки это разные истории, и раздел
+  // 5.4 требует, чтобы rate_source описывал, как число реально получилось.
+  | "frozen";
 
 export type RateChangeMode = "recalculate_period" | "apply_from_date" | "apply_next_period";
 

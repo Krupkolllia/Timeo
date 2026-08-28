@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useNavigate } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
@@ -25,6 +26,7 @@ import { DayScreen } from "@/pages/DayScreen/DayScreen";
 const userId = getLocalUserId();
 
 export function CalendarPage() {
+  const navigate = useNavigate();
   const [viewed, setViewed] = useState<PeriodId | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [openDayDate, setOpenDayDate] = useState<string | null>(null);
@@ -254,7 +256,15 @@ export function CalendarPage() {
         </p>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
+      {/* Раздел 8.1: «тап разворачивает полную расшифровку». Панель целиком —
+          кнопка, а не отдельная стрелка: это самая большая цель на экране, и
+          попасть по ней большим пальцем можно не глядя (инвариант 59). */}
+      <button
+        type="button"
+        onClick={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
+        aria-label={ru.period.openSummary}
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 text-left backdrop-blur active:bg-white/5"
+      >
         {/* Раздел 7.1: «строкой выше мелко: сравнение с прошлым периодом
             (например «+340 zł») и остаток до нормы часов». Знак берётся из
             значения, отдельного ключа в словаре ТЗ не предполагает. */}
@@ -277,7 +287,7 @@ export function CalendarPage() {
             {totals?.total_hours ?? 0} {ru.calendar.hoursShort}
           </span>
         </div>
-      </div>
+      </button>
 
       {pickerOpen && (
         <MonthYearPicker
@@ -310,6 +320,7 @@ export function CalendarPage() {
               settings={settings}
               onClose={() => setOpenDayDate(null)}
               onEntryDeleted={handleEntryDeleted}
+              onOpenPeriod={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
             />
           </div>
         </div>
