@@ -222,8 +222,14 @@ export function CalendarPage() {
       )}
 
       {openDayDate && period && dayTypes && (
-        <div className="fixed inset-0 z-10 flex items-end bg-black/50" onClick={() => setOpenDayDate(null)}>
-          <div className="w-full rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="day-sheet-overlay fixed inset-0 z-10 flex items-end bg-black/50"
+          onClick={() => setOpenDayDate(null)}
+        >
+          {/* Лимит высоты (85dvh) и анимация появления живут в .day-sheet — на
+              всей панели, а не на внутреннем скроллере DayScreen: ручка, дата
+              и p-4 обёртки шли сверх лимита и панель занимала 94% экрана. */}
+          <div className="day-sheet flex w-full flex-col rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" />
             <p className="mb-2 text-sm text-white/50">{formatDayTitle(openDayDate)}</p>
             <DayScreen

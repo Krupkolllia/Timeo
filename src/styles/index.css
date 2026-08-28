@@ -15,3 +15,48 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
+
+/* Шторка дня — раздел 7.2: «выезжает снизу, не занимает весь экран».
+   Ограничение высоты стоит на всей панели, а не на внутреннем скроллере:
+   иначе ручка, дата и padding обёртки добавлялись сверх лимита и панель
+   доходила до 94% экрана.
+
+   Две декларации max-height в одном правиле, а не два Tailwind-класса:
+   dvh выигрывает там, где поддерживается (iOS 16.4+), vh остаётся запасным,
+   и порядок деклараций внутри правила гарантирован — в отличие от порядка
+   сгенерированных утилит. В обычном Safari vh считается по большому вьюпорту,
+   и шторка вылезла бы за экран. */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.day-sheet {
+  max-height: 85vh;
+  max-height: 85dvh;
+  animation: sheet-in 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.day-sheet-overlay {
+  animation: overlay-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .day-sheet,
+  .day-sheet-overlay {
+    animation: none;
+  }
+}

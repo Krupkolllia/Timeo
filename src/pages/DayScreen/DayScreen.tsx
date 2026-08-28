@@ -307,7 +307,10 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
       : null;
 
   return (
-    <div className="flex max-h-[85vh] flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+    // min-h-0 обязателен: без него flex-элемент не сжимается ниже своего
+    // контента и overflow-y-auto не срабатывает. Лимит высоты — на панели
+    // целиком (.day-sheet в CalendarPage), здесь только скроллируемая часть.
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
       <div className="grid grid-cols-3 gap-2">
         {activeDayTypes.length === 0 && <p className="col-span-3 text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
