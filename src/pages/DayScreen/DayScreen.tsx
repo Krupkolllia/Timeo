@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
+import { NumberInput } from "@/components/NumberInput";
 import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } from "@/db/entries";
 import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
@@ -302,15 +303,10 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               >
                 −
               </button>
-              <input
-                type="number"
-                inputMode="decimal"
+              <NumberInput
                 className="w-20 rounded-lg bg-white/5 px-2 py-2 text-center text-lg"
                 value={draft.hours}
-                onChange={(e) => {
-                  const parsed = parseNumberInput(e.target.value);
-                  if (parsed !== null) handleHoursChange(parsed);
-                }}
+                onChange={handleHoursChange}
               />
               <button
                 className="h-10 w-10 rounded-full bg-white/10 text-lg active:bg-white/20"
@@ -319,40 +315,42 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
                 +
               </button>
             </div>
-            {showManyHoursHint && <p className="mt-1 text-xs text-white/40">{ru.day.hintManyHours}</p>}
+            <p className={`mt-1 text-xs text-white/40 ${showManyHoursHint ? "" : "invisible"}`}>
+              {ru.day.hintManyHours}
+            </p>
           </div>
 
-          {dayType.pay_mode === "hourly" && (
+          {/* Always rendered at the same height regardless of pay_mode — otherwise
+              the sheet visibly grows/shrinks every time a different day type is
+              tapped, since hourly types show two inputs and others show nothing. */}
+          {dayType.pay_mode === "hourly" ? (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-white/50">{ru.day.multiplier}</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
+                <NumberInput
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.multiplier}
-                  onChange={(e) => {
-                    const parsed = parseNumberInput(e.target.value);
-                    if (parsed !== null) handleMultiplierChange(parsed);
-                  }}
+                  onChange={handleMultiplierChange}
                 />
-                {sourceLabel && <p className="mt-1 text-xs text-white/40">{sourceLabel}, ×{draft.multiplier}</p>}
+                <p className={`mt-1 text-xs text-white/40 ${sourceLabel ? "" : "invisible"}`}>
+                  {sourceLabel ?? " "}, ×{draft.multiplier}
+                </p>
               </div>
               <div>
                 <label className="text-xs text-white/50">{ru.day.rate}</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
+                <NumberInput
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.rate_per_hour}
-                  onChange={(e) => {
-                    const parsed = parseNumberInput(e.target.value);
-                    if (parsed !== null) handleRateChange(parsed);
-                  }}
+                  onChange={handleRateChange}
                 />
-                {showZeroRateHint && <p className="mt-1 text-xs text-white/40">{ru.day.hintZeroRate}</p>}
+                <p className={`mt-1 text-xs text-white/40 ${showZeroRateHint ? "" : "invisible"}`}>
+                  {ru.day.hintZeroRate}
+                </p>
               </div>
+            </div>
+          ) : (
+            <div className="flex min-h-[92px] items-start rounded-lg bg-white/5 px-3 py-2 text-sm text-white/50">
+              {dayType.pay_mode === "unpaid" ? ru.day.payModeUnpaid : ru.day.payModeFixedAmount}
             </div>
           )}
 
@@ -405,27 +403,27 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               className={`h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
             >
               <span
-                className={`block h-5 w-5 translate-y-0.5 rounded-full bg-white transition-transform ${
-                  isManualAmount ? "translate-x-5" : "translate-x-0.5"
-                }`}
+                // Combining Tailwind's translate-x-*/translate-y-* utilities on the same
+                // element doesn't compose reliably (both write the shorthand `translate`
+                // property, and the x-axis one loses) — plain inline transform sidesteps
+                // it; transition-transform still animates it (it lists `transform` too).
+                className="block h-5 w-5 rounded-full bg-white transition-transform"
+                style={{ transform: isManualAmount ? "translate(22px, 2px)" : "translate(2px, 2px)" }}
               />
             </button>
           </div>
 
           <div>
             <label className="text-xs text-white/50">{ru.day.amount}</label>
-            <input
-              type="number"
-              inputMode="decimal"
+            <NumberInput
               disabled={!isManualAmount}
               className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-2xl font-semibold disabled:opacity-70"
               value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
-              onChange={(e) => {
-                const parsed = parseNumberInput(e.target.value);
-                if (parsed !== null) handleAmountOverrideChange(parsed);
-              }}
+              onChange={handleAmountOverrideChange}
             />
-            {showNegativeAmountHint && <p className="mt-1 text-xs text-white/40">{ru.day.hintNegativeAmount}</p>}
+            <p className={`mt-1 text-xs text-white/40 ${showNegativeAmountHint ? "" : "invisible"}`}>
+              {ru.day.hintNegativeAmount}
+            </p>
             <p className="mt-1 text-sm text-white/50">{settings.currency}</p>
           </div>
 

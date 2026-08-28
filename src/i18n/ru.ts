@@ -41,7 +41,7 @@ export const ru = {
     rate: "Ставка за час",
     amount: "Сумма за день",
     note: "Заметка",
-    notePlaceholder: "Например, во сколько вышел пораньше",
+    notePlaceholder: "Заметка",
     manualAmountToggle: "Указать сумму вручную",
     startTime: "Начало",
     endTime: "Конец",
@@ -53,6 +53,8 @@ export const ru = {
     hintManyHours: "Больше 24 часов за день — это точно верно?",
     hintNegativeAmount: "Сумма отрицательная — это точно верно?",
     hintZeroRate: "Ставка за час равна нулю",
+    payModeFixedAmount: "Фиксированная сумма за день",
+    payModeUnpaid: "Без оплаты",
   },
 } as const;
 
