@@ -8,6 +8,12 @@ interface NumberInputProps {
   disabled?: boolean;
 }
 
+// A number in progress: optional single "-", no leading zeros (other than "0"
+// itself or "0.5"), at most one ".". Rejects "00342", "--434", "000.33." —
+// these are numbers, not free text, so keystrokes that don't match are simply
+// ignored rather than accepted and reformatted after the fact.
+const IN_PROGRESS_NUMBER = /^-?(0|[1-9]\d*)?(\.\d*)?$/;
+
 // A plain type="number" input round-trips every keystroke through Number() and
 // back to a formatted string, so an in-progress "0." or "-" collapses back to
 // "0" before the user can finish typing a decimal or a negative number. This
@@ -28,13 +34,16 @@ export function NumberInput({ value, onChange, className, inputMode = "decimal",
       disabled={disabled}
       className={className}
       value={text}
+      onFocus={(e) => e.target.select()}
       onChange={(e) => {
         const next = e.target.value;
+        if (!IN_PROGRESS_NUMBER.test(next)) return;
         setText(next);
-        if (next.trim() === "") {
-          onChange(0);
-          return;
-        }
+
+        // "" and "-" are not numbers yet — propagating them as 0 would stomp on
+        // a dependent field (e.g. rate recalculated from multiplier) before the
+        // user has actually finished typing a new value.
+        if (next === "" || next === "-") return;
         const parsed = Number(next);
         if (!Number.isNaN(parsed)) onChange(parsed);
       }}

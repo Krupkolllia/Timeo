@@ -349,8 +349,15 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               </div>
             </div>
           ) : (
-            <div className="flex min-h-[92px] items-start rounded-lg bg-white/5 px-3 py-2 text-sm text-white/50">
-              {dayType.pay_mode === "unpaid" ? ru.day.payModeUnpaid : ru.day.payModeFixedAmount}
+            // Unpaid day types (day off, time off) don't need to say so — the name
+            // already makes that obvious; only reserve the height so the sheet
+            // doesn't resize when switching away from an hourly type.
+            <div
+              className={`flex min-h-[92px] items-start rounded-lg px-3 py-2 text-sm text-white/50 ${
+                dayType.pay_mode === "unpaid" ? "invisible" : "bg-white/5"
+              }`}
+            >
+              {ru.day.payModeFixedAmount}
             </div>
           )}
 
@@ -400,15 +407,15 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               role="switch"
               aria-checked={isManualAmount}
               onClick={() => handleToggleManualAmount(!isManualAmount)}
-              className={`h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
+              className={`relative h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
             >
+              {/* Absolute + left, not transform — a translate-based knob depends on the
+                  button not being a flex/centered container; absolute positioning against
+                  an explicit `relative` parent has no such ambiguity. */}
               <span
-                // Combining Tailwind's translate-x-*/translate-y-* utilities on the same
-                // element doesn't compose reliably (both write the shorthand `translate`
-                // property, and the x-axis one loses) — plain inline transform sidesteps
-                // it; transition-transform still animates it (it lists `transform` too).
-                className="block h-5 w-5 rounded-full bg-white transition-transform"
-                style={{ transform: isManualAmount ? "translate(22px, 2px)" : "translate(2px, 2px)" }}
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-[left] ${
+                  isManualAmount ? "left-[22px]" : "left-0.5"
+                }`}
               />
             </button>
           </div>

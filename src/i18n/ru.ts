@@ -54,7 +54,6 @@ export const ru = {
     hintNegativeAmount: "Сумма отрицательная — это точно верно?",
     hintZeroRate: "Ставка за час равна нулю",
     payModeFixedAmount: "Фиксированная сумма за день",
-    payModeUnpaid: "Без оплаты",
   },
 } as const;
 
