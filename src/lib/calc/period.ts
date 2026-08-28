@@ -22,10 +22,33 @@ function clampDayToMonth(year: number, monthIndex0: number, day: number): number
 }
 
 export function calculatePeriodTotals(
-  period: Pick<Period, "extra_amount" | "norm_hours">,
+  period: Pick<Period, "extra_amount" | "norm_hours" | "is_closed" | "is_manual" | "closed_totals">,
   entries: Entry[],
   dayTypeById: Map<string, Pick<DayType, "counts_as_work" | "counts_toward_norm">>,
 ): PeriodTotals {
+  // Раздел 6.4: закрытый период — зафиксированный снимок, ручной период вообще
+  // не имеет записей. В обоих случаях суммирование не выполняется, иначе любая
+  // правка ставки или правил задним числом меняла бы уже закрытый месяц.
+  if (period.is_closed || period.is_manual) {
+    const snapshot = period.closed_totals;
+    if (snapshot) {
+      return {
+        amount: roundMoney(snapshot.amount),
+        total_hours: roundHours(snapshot.total_hours),
+        norm_hours_covered: roundHours(snapshot.norm_hours_covered),
+        remaining_to_norm: roundHours(period.norm_hours - snapshot.norm_hours_covered),
+      };
+    }
+    // Снимка нет (ручной период ещё не заполнен) — нулевой итог честнее,
+    // чем сумма по записям, которых у такого периода не должно быть вовсе.
+    if (period.is_manual) {
+      return { amount: 0, total_hours: 0, norm_hours_covered: 0, remaining_to_norm: period.norm_hours };
+    }
+    // is_closed без снимка (закрыли, но снимок не записали) намеренно
+    // проваливается в обычное суммирование — защита от потери данных при
+    // незавершённом закрытии.
+  }
+
   let amount = period.extra_amount;
   let total_hours = 0;
   let norm_hours_covered = 0;

@@ -7,7 +7,7 @@ import {
   getPeriodLabel,
   periodForDate,
 } from "@/lib/calc/period";
-import type { DayType, Entry } from "@/types/models";
+import type { DayType, Entry, Period } from "@/types/models";
 
 describe("periodForDate", () => {
   it("treats calendar month as the period when period_start_day is 1", () => {
@@ -103,6 +103,19 @@ describe("calculatePeriodTotals", () => {
     counts_toward_norm: true,
   };
 
+  type TotalsPeriod = Pick<Period, "extra_amount" | "norm_hours" | "is_closed" | "is_manual" | "closed_totals">;
+
+  function makePeriod(overrides: Partial<TotalsPeriod> = {}): TotalsPeriod {
+    return {
+      extra_amount: 0,
+      norm_hours: 160,
+      is_closed: false,
+      is_manual: false,
+      closed_totals: null,
+      ...overrides,
+    };
+  }
+
   function makeEntry(overrides: Partial<Entry>): Entry {
     return {
       id: "e",
@@ -131,7 +144,7 @@ describe("calculatePeriodTotals", () => {
     const dayTypeById = new Map([["work", workDayType]]);
     const entries = [makeEntry({ day_type_id: "work", amount: 80 }), makeEntry({ day_type_id: "work", amount: 100 })];
 
-    const totals = calculatePeriodTotals({ extra_amount: 50, norm_hours: 160 }, entries, dayTypeById);
+    const totals = calculatePeriodTotals(makePeriod({ extra_amount: 50 }), entries, dayTypeById);
 
     expect(totals.amount).toBe(230);
   });
@@ -146,7 +159,7 @@ describe("calculatePeriodTotals", () => {
       makeEntry({ day_type_id: "vacation", hours: 8, amount: 80 }),
     ];
 
-    const totals = calculatePeriodTotals({ extra_amount: 0, norm_hours: 160 }, entries, dayTypeById);
+    const totals = calculatePeriodTotals(makePeriod(), entries, dayTypeById);
 
     expect(totals.total_hours).toBe(8);
     expect(totals.norm_hours_covered).toBe(16);
@@ -162,7 +175,7 @@ describe("calculatePeriodTotals", () => {
       makeEntry({ day_type_id: "work", amount: 0.1, hours: 0.1 }),
     ];
 
-    const totals = calculatePeriodTotals({ extra_amount: 0, norm_hours: 160 }, entries, dayTypeById);
+    const totals = calculatePeriodTotals(makePeriod(), entries, dayTypeById);
 
     expect(totals.amount).toBe(0.3);
     expect(totals.total_hours).toBe(0.3);
@@ -170,8 +183,41 @@ describe("calculatePeriodTotals", () => {
     expect(totals.remaining_to_norm).toBe(159.7);
   });
 
+  it("uses the closed snapshot and ignores entries for a closed period (section 6.4)", () => {
+    // Закрытие фиксирует итог: никакие изменения ставок и правил на него не влияют.
+    const dayTypeById = new Map([["work", workDayType]]);
+    const entries = [makeEntry({ day_type_id: "work", hours: 8, amount: 80 })];
+    const period = makePeriod({
+      is_closed: true,
+      closed_totals: { amount: 4321, total_hours: 168, norm_hours_covered: 160 },
+      extra_amount: 50,
+    });
+
+    const totals = calculatePeriodTotals(period, entries, dayTypeById);
+
+    expect(totals).toEqual({ amount: 4321, total_hours: 168, norm_hours_covered: 160, remaining_to_norm: 0 });
+  });
+
+  it("returns zero totals for a manual period with no snapshot yet", () => {
+    // У ручного периода записей не бывает вовсе — ноль честнее суммы по ним.
+    const totals = calculatePeriodTotals(makePeriod({ is_manual: true }), [], new Map());
+
+    expect(totals).toEqual({ amount: 0, total_hours: 0, norm_hours_covered: 0, remaining_to_norm: 160 });
+  });
+
+  it("falls back to summing entries for a closed period whose snapshot was never written", () => {
+    // Защита от потери данных при незавершённом закрытии.
+    const dayTypeById = new Map([["work", workDayType]]);
+    const entries = [makeEntry({ day_type_id: "work", hours: 8, amount: 80 })];
+
+    const totals = calculatePeriodTotals(makePeriod({ is_closed: true }), entries, dayTypeById);
+
+    expect(totals.amount).toBe(80);
+    expect(totals.total_hours).toBe(8);
+  });
+
   it("returns zero totals with no entries, remaining_to_norm equal to norm_hours", () => {
-    const totals = calculatePeriodTotals({ extra_amount: 0, norm_hours: 160 }, [], new Map());
+    const totals = calculatePeriodTotals(makePeriod(), [], new Map());
 
     expect(totals).toEqual({ amount: 0, total_hours: 0, norm_hours_covered: 0, remaining_to_norm: 160 });
   });
