@@ -107,19 +107,24 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
 ];
 
 export async function ensureDayTypesSeeded(db: TimeoDB, userId: string): Promise<void> {
-  const existing = await db.day_types.where("user_id").equals(userId).count();
-  if (existing > 0) return;
+  // rw-транзакция делает check-then-insert атомарным: без неё два параллельных
+  // вызова (например, двойной вызов эффекта в React StrictMode) оба видят
+  // пустую таблицу и каждый досеивает свой набор пресетов — дубликаты.
+  return db.transaction("rw", db.day_types, async () => {
+    const existing = await db.day_types.where("user_id").equals(userId).count();
+    if (existing > 0) return;
 
-  const now = new Date().toISOString();
-  await db.day_types.bulkAdd(
-    PRESET_DAY_TYPES.map((preset) => ({
-      ...preset,
-      id: crypto.randomUUID(),
-      user_id: userId,
-      created_at: now,
-      updated_at: now,
-      deleted_at: null,
-      is_archived: false,
-    })),
-  );
+    const now = new Date().toISOString();
+    await db.day_types.bulkAdd(
+      PRESET_DAY_TYPES.map((preset) => ({
+        ...preset,
+        id: crypto.randomUUID(),
+        user_id: userId,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+        is_archived: false,
+      })),
+    );
+  });
 }

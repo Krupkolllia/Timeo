@@ -47,6 +47,15 @@ describe("ensureDayTypesSeeded", () => {
     expect(rows).toHaveLength(PRESET_DAY_TYPES.length);
   });
 
+  it("never duplicates the preset when called concurrently (e.g. React StrictMode double effect)", async () => {
+    const database = openDb();
+
+    await Promise.all([ensureDayTypesSeeded(database, "user-1"), ensureDayTypesSeeded(database, "user-1")]);
+
+    const rows = await database.day_types.where("user_id").equals("user-1").toArray();
+    expect(rows).toHaveLength(PRESET_DAY_TYPES.length);
+  });
+
   it("seeds independently per user", async () => {
     const database = openDb();
 

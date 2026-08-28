@@ -34,4 +34,14 @@ describe("ensureSettings", () => {
     const rows = await database.settings.where("user_id").equals("user-1").toArray();
     expect(rows).toHaveLength(1);
   });
+
+  it("never creates two rows when called concurrently (e.g. React StrictMode double effect)", async () => {
+    const database = openDb();
+
+    const [first, second] = await Promise.all([ensureSettings(database, "user-1"), ensureSettings(database, "user-1")]);
+
+    expect(second.id).toBe(first.id);
+    const rows = await database.settings.where("user_id").equals("user-1").toArray();
+    expect(rows).toHaveLength(1);
+  });
 });

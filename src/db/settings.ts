@@ -19,18 +19,23 @@ export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
 };
 
 export async function ensureSettings(db: TimeoDB, userId: string): Promise<Settings> {
-  const existing = await db.settings.where("user_id").equals(userId).first();
-  if (existing) return existing;
+  // rw-транзакция делает check-then-insert атомарным: без неё два параллельных
+  // вызова (например, двойной вызов эффекта в React StrictMode) оба не находят
+  // строку и создают по дубликату настроек на одного user_id.
+  return db.transaction("rw", db.settings, async () => {
+    const existing = await db.settings.where("user_id").equals(userId).first();
+    if (existing) return existing;
 
-  const now = new Date().toISOString();
-  const settings: Settings = {
-    id: crypto.randomUUID(),
-    user_id: userId,
-    created_at: now,
-    updated_at: now,
-    deleted_at: null,
-    ...DEFAULT_SETTINGS,
-  };
-  await db.settings.add(settings);
-  return settings;
+    const now = new Date().toISOString();
+    const settings: Settings = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+      ...DEFAULT_SETTINGS,
+    };
+    await db.settings.add(settings);
+    return settings;
+  });
 }

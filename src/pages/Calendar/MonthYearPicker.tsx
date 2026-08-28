@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ru } from "@/i18n/ru";
 
 interface MonthYearPickerProps {
@@ -8,21 +9,25 @@ interface MonthYearPickerProps {
 }
 
 export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPickerProps) {
+  // Год листается внутри пикера и подтверждается только тапом по месяцу —
+  // иначе стрелки года сразу закрывали бы пикер и переключали период.
+  const [displayYear, setDisplayYear] = useState(year);
+
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-6" onClick={onClose}>
       <div className="w-full max-w-xs rounded-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <button
             className="rounded-full p-2 text-white/70 active:bg-white/10"
-            onClick={() => onSelect({ year: year - 1, month })}
+            onClick={() => setDisplayYear((y) => y - 1)}
             aria-label="Предыдущий год"
           >
             ‹
           </button>
-          <span className="text-lg font-semibold">{year}</span>
+          <span className="text-lg font-semibold">{displayYear}</span>
           <button
             className="rounded-full p-2 text-white/70 active:bg-white/10"
-            onClick={() => onSelect({ year: year + 1, month })}
+            onClick={() => setDisplayYear((y) => y + 1)}
             aria-label="Следующий год"
           >
             ›
@@ -31,11 +36,11 @@ export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPic
         <div className="grid grid-cols-3 gap-2">
           {ru.calendar.monthNames.map((name, index) => {
             const monthNumber = index + 1;
-            const isSelected = monthNumber === month;
+            const isSelected = monthNumber === month && displayYear === year;
             return (
               <button
                 key={name}
-                onClick={() => onSelect({ year, month: monthNumber })}
+                onClick={() => onSelect({ year: displayYear, month: monthNumber })}
                 className={`rounded-lg py-2 text-sm ${
                   isSelected ? "bg-app-accent text-slate-900" : "bg-white/5 text-white active:bg-white/10"
                 }`}
