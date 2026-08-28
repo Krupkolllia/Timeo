@@ -93,6 +93,25 @@ describe("calculateEntryAmount", () => {
     expect(result.amount).toBe(0);
   });
 
+  it("rounds money to two decimals instead of leaking float tails into the entry", () => {
+    // Воспроизведение бага: base_rate 33.3 и пресет «Ночная смена» (×1.5) давали
+    // rate_per_hour 49.949999999999996 и amount 399.59999999999997 прямо в поле ввода.
+    const entry = makeEntry({ hours: 8, multiplier: 1.5, rate_is_manual: false });
+    const dayType = { pay_mode: "hourly" as const, fixed_amount: null };
+    const result = calculateEntryAmount(entry, dayType, { base_rate: 33.3 });
+    expect(result.rate_per_hour).toBe(49.95);
+    expect(result.amount).toBe(399.6);
+  });
+
+  it("rounds the rate before multiplying by hours, not after", () => {
+    // 8 × 49.949999… снова даёт хвост, если округлять только итог.
+    const entry = makeEntry({ hours: 8, multiplier: 3, rate_is_manual: false });
+    const dayType = { pay_mode: "hourly" as const, fixed_amount: null };
+    const result = calculateEntryAmount(entry, dayType, { base_rate: 33.3 });
+    expect(result.rate_per_hour).toBe(99.9);
+    expect(result.amount).toBe(799.2);
+  });
+
   it("does not block negative hours or negative override amounts (section 8: no hard validation)", () => {
     const entry = makeEntry({ amount_override: -50 });
     const dayType = { pay_mode: "hourly" as const, fixed_amount: null };
@@ -157,7 +176,9 @@ describe("buildEntryDefaultsForDayType", () => {
     const result = buildEntryDefaultsForDayType(new Date(2026, 0, 1), dayType, period, holiday, weekendMultipliers);
 
     expect(result.multiplier).toBe(1);
-    expect(result.multiplier_source).toBe("day_type_ignore");
-    expect(result.rate_source).toBe("day_type_default");
+    // Подавление сработало (множитель праздника 2.5 не применён), но ×1 не
+    // подписывается как множитель типа дня — см. resolveMultiplier.
+    expect(result.multiplier_source).toBe("default");
+    expect(result.rate_source).toBe("period_base");
   });
 });

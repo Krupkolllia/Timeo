@@ -4,7 +4,7 @@ import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
 import { getOrCreatePeriod } from "@/db/periods";
-import { listActiveEntriesForDate, restoreEntry } from "@/db/entries";
+import { restoreEntry } from "@/db/entries";
 import type { Entry } from "@/types/models";
 import {
   calculatePeriodTotals,
@@ -16,6 +16,8 @@ import {
   type PeriodId,
 } from "@/lib/calc/period";
 import { buildWeeks, toISODate } from "@/lib/calc/calendarGrid";
+import { roundHours, roundMoney } from "@/lib/calc/round";
+import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
@@ -81,6 +83,34 @@ export function CalendarPage() {
       .toArray();
   }, [range]);
 
+  // Предыдущий период — только для сравнения в панели итогов (раздел 7.1).
+  // getOrCreatePeriod здесь намеренно не вызывается: он создаёт строку при
+  // первом обращении (раздел 5.2), и календарь начал бы плодить пустые
+  // периоды назад по времени просто от пролистывания.
+  const previous = useMemo(() => (viewed ? getAdjacentPeriod(viewed.year, viewed.month, -1) : null), [viewed]);
+
+  const previousPeriod = useLiveQuery(
+    () =>
+      previous
+        ? db.periods.where("[user_id+year+month]").equals([userId, previous.year, previous.month]).first()
+        : undefined,
+    [previous],
+  );
+
+  const previousRange = useMemo(
+    () => (previous && settings ? getPeriodDateRange(previous.year, previous.month, settings.period_start_day) : null),
+    [previous, settings],
+  );
+
+  const previousEntries = useLiveQuery(async () => {
+    if (!previousRange) return [];
+    return db.entries
+      .where("date")
+      .between(toISODate(previousRange.start), toISODate(previousRange.end), true, true)
+      .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
+      .toArray();
+  }, [previousRange]);
+
   useEffect(() => {
     return () => {
       if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
@@ -96,26 +126,39 @@ export function CalendarPage() {
   async function handleUndoDelete() {
     if (!pendingUndo) return;
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-    // Пока была открыта плашка "отменить", пользователь мог зайти на тот же
-    // день и создать новую запись поверх удалённой. В этом узком случае не
-    // восстанавливаем старую — иначе на дату окажется две активные записи, и
-    // calculatePeriodTotals задвоит сумму/часы за день. Компромисс: удалённая
-    // запись остаётся удалённой, а свежесозданная — единственный источник
-    // истины за эту дату.
-    const alreadyReplaced = (await listActiveEntriesForDate(db, pendingUndo.user_id, pendingUndo.date)).length > 0;
-    if (!alreadyReplaced) {
-      await restoreEntry(db, pendingUndo.id);
-    }
+    // Раньше здесь стояла проверка «на дату уже появилась активная запись — не
+    // восстанавливаем», чтобы не получить две строки за день. С поддержкой
+    // нескольких записей (раздел 5.4) восстановление всегда безопасно.
+    await restoreEntry(db, pendingUndo.id);
     setPendingUndo(null);
   }
 
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
-  const entryByDate = useMemo(() => new Map((entries ?? []).map((entry) => [entry.date, entry])), [entries]);
+  // Раздел 5.4 допускает несколько записей на один день, поэтому дата
+  // отображается в список: Map<string, Entry> терял все записи, кроме последней,
+  // и ячейка расходилась с нижней панелью, которая суммирует их все.
+  const entriesByDate = useMemo(() => {
+    const map = new Map<string, Entry[]>();
+    for (const entry of entries ?? []) {
+      const list = map.get(entry.date);
+      if (list) list.push(entry);
+      else map.set(entry.date, [entry]);
+    }
+    return map;
+  }, [entries]);
 
   const totals = useMemo(() => {
     if (!period) return null;
     return calculatePeriodTotals(period, entries ?? [], dayTypeById);
   }, [period, entries, dayTypeById]);
+
+  // Сравнение показываем только если предыдущий период реально существует:
+  // «+0» на первом же месяце использования дезинформирует.
+  const delta = useMemo(() => {
+    if (!previousPeriod || !totals) return null;
+    const previousTotals = calculatePeriodTotals(previousPeriod, previousEntries ?? [], dayTypeById);
+    return roundMoney(totals.amount - previousTotals.amount);
+  }, [previousPeriod, previousEntries, dayTypeById, totals]);
 
   if (!settings || !viewed || !range) {
     return (
@@ -164,8 +207,8 @@ export function CalendarPage() {
             {week.map((date) => {
               const iso = toISODate(date);
               const inPeriod = date >= range.start && date <= range.end;
-              const entry = entryByDate.get(iso);
-              const dayType = entry ? dayTypeById.get(entry.day_type_id) : undefined;
+              const dayEntries = entriesByDate.get(iso) ?? [];
+              const dayHours = roundHours(dayEntries.reduce((sum, e) => sum + e.hours, 0));
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
 
               return (
@@ -178,18 +221,53 @@ export function CalendarPage() {
                   } ${isWeekend && inPeriod ? "text-app-accent" : "text-white"}`}
                 >
                   <span>{date.getDate()}</span>
-                  {dayType && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dayType.color }} />}
-                  {entry && entry.hours > 0 && <span className="text-[10px] text-white/50">{entry.hours}{ru.calendar.hoursShort}</span>}
+                  {/* Не больше трёх точек: ячейка 50px шириной, три точки по 6px
+                      с зазорами укладываются в 22px. */}
+                  {dayEntries.length > 0 && (
+                    <span className="flex gap-0.5">
+                      {dayEntries.slice(0, 3).map((e) => (
+                        <span
+                          key={e.id}
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: dayTypeById.get(e.day_type_id)?.color }}
+                        />
+                      ))}
+                    </span>
+                  )}
+                  {dayHours > 0 && (
+                    <span className="text-[10px] text-white/50">
+                      {dayHours}
+                      {ru.calendar.hoursShort}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
         ))}
+
+        {/* Временный индикатор сборки: тестирование идёт удалённо (раздел 12 ТЗ), и без него
+            неотличимо «баг не исправлен» от «на телефоне закешировалась старая версия».
+            Переехать в экран настроек (раздел 7.4), когда тот появится в блоке 6. */}
+        <p className="mt-auto pt-4 text-center text-[10px] text-white/25">
+          v{__APP_VERSION__}{__BUILD_SHA__ && ` · ${__BUILD_SHA__}`}
+        </p>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
-        <div className="text-xs text-white/50">
-          {ru.calendar.remainingToNorm}: {totals ? totals.remaining_to_norm : "—"} {ru.calendar.hoursShort}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
+        {/* Раздел 7.1: «строкой выше мелко: сравнение с прошлым периодом
+            (например «+340 zł») и остаток до нормы часов». Знак берётся из
+            значения, отдельного ключа в словаре ТЗ не предполагает. */}
+        <div className="flex items-baseline gap-3 text-xs text-white/50">
+          {delta !== null && (
+            <span>
+              {delta >= 0 ? "+" : "−"}
+              {Math.abs(delta).toFixed(2)} {settings.currency}
+            </span>
+          )}
+          <span>
+            {ru.calendar.remainingToNorm}: {totals ? totals.remaining_to_norm : "—"} {ru.calendar.hoursShort}
+          </span>
         </div>
         <div className="mt-1 flex items-baseline justify-between">
           <span className="text-2xl font-semibold">
@@ -214,10 +292,16 @@ export function CalendarPage() {
       )}
 
       {openDayDate && period && dayTypes && (
-        <div className="fixed inset-0 z-10 flex items-end bg-black/50" onClick={() => setOpenDayDate(null)}>
-          <div className="w-full rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="day-sheet-overlay fixed inset-0 z-10 flex items-end bg-black/50"
+          onClick={() => setOpenDayDate(null)}
+        >
+          {/* Лимит высоты (85dvh) и анимация появления живут в .day-sheet — на
+              всей панели, а не на внутреннем скроллере DayScreen: ручка, дата
+              и p-4 обёртки шли сверх лимита и панель занимала 94% экрана. */}
+          <div className="day-sheet flex w-full flex-col rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" />
-            <p className="mb-2 text-sm text-white/50">{openDayDate}</p>
+            <p className="mb-2 text-sm text-white/50">{formatDayTitle(openDayDate)}</p>
             <DayScreen
               date={openDayDate}
               userId={userId}
@@ -231,10 +315,20 @@ export function CalendarPage() {
         </div>
       )}
 
+      {/* Плашка отмены живёт сверху, а не над панелью итогов: низ занят самым
+          важным элементом интерфейса (раздел 7.1), и любое размещение над ним
+          либо перекрывает три показателя ровно на те 5 секунд, когда
+          пользователь смотрит на изменившийся итог, либо двигает их вверх и
+          даёт скачок вёрстки. */}
       {pendingUndo && (
-        <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] z-30 flex items-center justify-between rounded-xl bg-slate-800 px-4 py-3 shadow-lg">
+        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
           <span className="text-sm">{ru.day.deletedNotice}</span>
-          <button className="text-sm font-semibold text-app-accent" onClick={handleUndoDelete}>
+          {/* min-h-11 поднимает область нажатия до 44px (была 20px), -mr-2
+              компенсирует добавленный padding, чтобы плашка не растолстела. */}
+          <button
+            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent"
+            onClick={handleUndoDelete}
+          >
             {ru.day.undo}
           </button>
         </div>

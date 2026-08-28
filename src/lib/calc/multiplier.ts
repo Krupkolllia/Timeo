@@ -16,7 +16,14 @@ export function resolveMultiplier(
   weekendMultipliers: WeekendMultipliers,
 ): MultiplierResult {
   if (dayType.ignore_auto_multipliers) {
-    return { value: dayType.default_multiplier, source: "day_type_ignore" };
+    // Ранний выход обязателен в любом случае: он и есть подавление правил
+    // выходного/праздника (раздел 5.3 — отпуск в воскресенье не оплачивается
+    // вдвойне). Различаем только подпись: ×1 не несёт информации, и «отпуск,
+    // ×1» на экране дня — ровно та бессмысленная подпись, которой избегает
+    // комментарий ниже.
+    return dayType.default_multiplier === 1
+      ? { value: 1, source: "default" }
+      : { value: dayType.default_multiplier, source: "day_type_ignore" };
   }
 
   if (holiday) {

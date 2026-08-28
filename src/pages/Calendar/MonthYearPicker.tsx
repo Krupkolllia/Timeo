@@ -20,7 +20,7 @@ export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPic
           <button
             className="rounded-full p-2 text-white/70 active:bg-white/10"
             onClick={() => setDisplayYear((y) => y - 1)}
-            aria-label="Предыдущий год"
+            aria-label={ru.calendar.prevYear}
           >
             ‹
           </button>
@@ -28,7 +28,7 @@ export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPic
           <button
             className="rounded-full p-2 text-white/70 active:bg-white/10"
             onClick={() => setDisplayYear((y) => y + 1)}
-            aria-label="Следующий год"
+            aria-label={ru.calendar.nextYear}
           >
             ›
           </button>

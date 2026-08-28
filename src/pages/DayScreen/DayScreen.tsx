@@ -5,6 +5,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } from "@/db/entries";
 import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
+import { roundMultiplier } from "@/lib/calc/round";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
 
@@ -109,7 +110,14 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   );
   const dayTypeById = useMemo(() => new Map(dayTypes.map((dt) => [dt.id, dt])), [dayTypes]);
 
-  const entries = useLiveQuery(() => listActiveEntriesForDate(db, userId, date), [userId, date]);
+  // Детерминированный порядок: Dexie отдаёт записи по индексу date, порядок
+  // вставки внутри одной даты не гарантирован, а полоска записей и выбор
+  // «первой» не должны прыгать между перечитываниями.
+  const entries = useLiveQuery(
+    async () =>
+      (await listActiveEntriesForDate(db, userId, date)).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [userId, date],
+  );
   const holiday = useLiveQuery(
     () =>
       db.holidays
@@ -120,7 +128,12 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     [userId, date],
   );
 
-  const entry = entries?.[0];
+  // Раздел 5.4: «допускается несколько записей на один день». Без выбора экран
+  // открывал только entries[0]: вторая запись была невидима, недоступна для
+  // правки, а «Удалить запись» удаляла не ту, которую видит пользователь.
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const entry = selectedEntryId ? entries?.find((e) => e.id === selectedEntryId) : entries?.[0];
+
   const parsedDate = useMemo(() => {
     const [y, m, d] = date.split("-").map(Number);
     return new Date(y, m - 1, d);
@@ -145,11 +158,32 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   // instead of silently discarding them for the new type's defaults.
   const hasEditedRef = useRef(false);
 
+  // Какой записи соответствует текущий черновик (null — записи ещё нет).
+  // Отдельный ref, а не entryIdRef: тот синхронизируется эффектом выше, который
+  // объявлен раньше и успевает отработать первым — проверка стала бы всегда истинной.
+  const draftEntryIdRef = useRef<string | null>(null);
+
+  // Флаг «пользователь уже вводил значения» живёт на время посещения дня, а не
+  // строки в базе: первый же ввод создаёт запись и меняет entry.id, и общий
+  // эффект инициализации сбрасывал бы флаг ровно тогда, когда вводить начали.
+  useEffect(() => {
+    hasEditedRef.current = false;
+    draftEntryIdRef.current = null;
+    setSelectedEntryId(null);
+  }, [date]);
+
   // Инициализация/переключение черновика — только когда меняется сама запись
   // (её id) или выбранный день, а не при каждом чтении из Dexie: иначе
   // собственная запись экрана эхом прилетала бы обратно и перетирала то, что
   // пользователь только что набирает в поле.
   useEffect(() => {
+    // Создание записи в полёте: черновик уже содержит то, что пользователь
+    // ввёл, а entries на этот момент ещё показывает прежний состав дня.
+    if (creatingRef.current) return;
+    // Черновик уже соответствует этой записи — повторная инициализация затёрла
+    // бы то, что пользователь набирает прямо сейчас.
+    if (entry && entry.id === draftEntryIdRef.current) return;
+
     if (entry) {
       setDraft(entryToDraft(entry));
     } else if (activeDayTypes.length > 0) {
@@ -164,9 +198,9 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     } else {
       setDraft(null);
     }
-    hasEditedRef.current = false;
+    draftEntryIdRef.current = entry?.id ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, date]);
+  }, [entry?.id, date, selectedEntryId]);
 
   const dayType = draft ? dayTypeById.get(draft.day_type_id) : undefined;
 
@@ -183,6 +217,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
       entryIdRef.current = created.id;
+      draftEntryIdRef.current = created.id;
       await updateEntry(db, created.id, next);
       return;
     }
@@ -191,7 +226,11 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     creatingRef.current = promise;
     const created = await promise;
     entryIdRef.current = created.id;
+    draftEntryIdRef.current = created.id;
     creatingRef.current = null;
+    // Только что созданная запись становится выбранной: иначе на дне с
+    // несколькими записями экран продолжил бы показывать первую.
+    setSelectedEntryId(created.id);
   }
 
   function handleSelectDayType(dt: DayType) {
@@ -238,14 +277,28 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Правка ставки фиксирует rate_is_manual=true — множитель остаётся как есть,
-    // чисто для истории/отображения (раздел 3 ТЗ).
+    // Раздел 3 ТЗ: поля связаны в обе стороны. Ставка, введённая руками, задаёт
+    // множитель = ставка / базовая ставка периода — иначе на экране остаётся пара
+    // «×2 и 50 zł», которая при base_rate 33.3 не может быть верной одновременно.
+    // При базовой ставке 0 делить не на что — множитель оставляем как есть.
+    const multiplier = period.base_rate !== 0 ? roundMultiplier(rate / period.base_rate) : draft.multiplier;
+    // rate_is_manual=true сохраняется: по разделу 6.1 вписанная пользователем
+    // ставка перестаёт зависеть от base_rate, и calculateEntryAmount возьмёт
+    // именно её, а не пересчитает из множителя. Множитель здесь — производное
+    // значение для отображения и истории.
     const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, rate_per_hour: rate, rate_is_manual: true },
+      { ...draft, multiplier, rate_per_hour: rate, rate_is_manual: true },
       dayType,
       period,
     );
-    void persist({ ...draft, rate_is_manual: true, rate_per_hour, amount, rate_source: mapRateSource("default", true) });
+    void persist({
+      ...draft,
+      multiplier,
+      rate_is_manual: true,
+      rate_per_hour,
+      amount,
+      rate_source: mapRateSource("default", true),
+    });
   }
 
   function handleNoteChange(note: string) {
@@ -278,26 +331,96 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     void persist({ ...draft, ...patch });
   }
 
+  function handleAddEntry() {
+    if (activeDayTypes.length === 0) return;
+    // Новая строка, а не правка текущей: сбрасываем и выбранную запись, и
+    // ссылки, по которым persist решает, обновлять или вставлять.
+    setSelectedEntryId(null);
+    entryIdRef.current = null;
+    creatingRef.current = null;
+    draftEntryIdRef.current = null;
+    hasEditedRef.current = false;
+    const defaults = buildEntryDefaultsForDayType(
+      parsedDate,
+      activeDayTypes[0],
+      period,
+      holiday,
+      settings.weekend_multipliers,
+    );
+    void persist(draftFromDefaults(activeDayTypes[0].id, defaults));
+  }
+
   async function handleDelete() {
     if (!entry) return;
-    await softDeleteEntry(db, entry.id);
-    onEntryDeleted(entry);
-    onClose();
+    const deleted = entry;
+    await softDeleteEntry(db, deleted.id);
+    onEntryDeleted(deleted);
+
+    // Шторку закрываем только если день опустел: удаление одной из нескольких
+    // записей не должно выкидывать пользователя из дня.
+    const remaining = (entries ?? []).filter((e) => e.id !== deleted.id);
+    entryIdRef.current = null;
+    draftEntryIdRef.current = null;
+    if (remaining.length === 0) {
+      onClose();
+      return;
+    }
+    setSelectedEntryId(remaining[0].id);
   }
 
   const isManualAmount = draft?.amount_override !== null && draft?.amount_override !== undefined;
-  const multiplierResult = dayType
+  const autoMultiplier = dayType
     ? resolveMultiplier(parsedDate, dayType, holiday, settings.weekend_multipliers)
     : null;
-  const showMultiplierSourceLabel = multiplierResult && draft && multiplierResult.value === draft.multiplier;
-  const sourceLabel = showMultiplierSourceLabel ? multiplierSourceLabel(multiplierResult.source) : null;
+  // Раздел 6.2: значение видно всегда. Если оно разошлось с автоматическим
+  // правилом — значит, его задали руками, и это тоже источник, а не повод
+  // молчать. Раньше подпись получала класс invisible ровно в тот момент,
+  // когда пользователь задавал множитель сам.
+  const sourceLabel =
+    !autoMultiplier || !draft
+      ? null
+      : autoMultiplier.value === draft.multiplier
+        ? multiplierSourceLabel(autoMultiplier.source)
+        : ru.day.multiplierSourceManual;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
-  const showNegativeAmountHint = (draft?.amount ?? 0) < 0;
   const showZeroRateHint = dayType?.pay_mode === "hourly" && !isManualAmount && (draft?.rate_per_hour ?? 0) === 0;
 
+  // Раздел 6.1: unpaid всегда даёт 0, и множитель со ставкой на результат не
+  // влияют. Раздел 8 запрещает запрещать — поля остаются редактируемыми
+  // (осознанное решение коммита 8dec465), но приглушаются, а под суммой
+  // появляется объяснение, откуда ноль. Прозрачность вместо запрета.
+  const isUnpaidWithoutOverride = dayType?.pay_mode === "unpaid" && !isManualAmount;
+  const amountHint = isUnpaidWithoutOverride
+    ? ru.day.hintUnpaidDayType
+    : (draft?.amount ?? 0) < 0
+      ? ru.day.hintNegativeAmount
+      : null;
+
   return (
-    <div className="flex max-h-[85vh] flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+    // min-h-0 обязателен: без него flex-элемент не сжимается ниже своего
+    // контента и overflow-y-auto не срабатывает. Лимит высоты — на панели
+    // целиком (.day-sheet в CalendarPage), здесь только скроллируемая часть.
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+      {/* Полоска записей — только когда их больше одной: обычный день с одной
+          записью должен выглядеть ровно как раньше. */}
+      {entries && entries.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto">
+          {entries.map((e, index) => (
+            <button
+              key={e.id}
+              onClick={() => setSelectedEntryId(e.id)}
+              className={`min-h-11 shrink-0 rounded-lg px-3 text-sm ${
+                e.id === entry?.id ? "bg-white/15 text-white" : "bg-white/5 text-white/60"
+              }`}
+            >
+              {index + 1}. {dayTypeById.get(e.day_type_id)?.name} · {e.hours}
+              {ru.calendar.hoursShort}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2">
         {activeDayTypes.length === 0 && <p className="col-span-3 text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
@@ -353,7 +476,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               pins amount at 0 per section 6.1 of the spec; only fixed_amount types
               fall back to the placeholder plate. */}
           {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid grid-cols-2 gap-3 ${isUnpaidWithoutOverride ? "opacity-60" : ""}`}>
               <div>
                 <label className="text-xs text-white/50">{ru.day.multiplier}</label>
                 <NumberInput
@@ -361,8 +484,10 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
                   value={draft.multiplier}
                   onChange={handleMultiplierChange}
                 />
-                <p className={`mt-1 text-xs text-white/40 ${sourceLabel ? "" : "invisible"}`}>
-                  {sourceLabel ?? " "}, ×{draft.multiplier}
+                {/* Строка видна всегда, поэтому резервировать высоту через
+                    invisible больше не нужно — скачков вёрстки не будет. */}
+                <p className="mt-1 text-xs text-white/40">
+                  {sourceLabel ? `${sourceLabel}, ×${draft.multiplier}` : `×${draft.multiplier}`}
                 </p>
               </div>
               <div>
@@ -447,16 +572,19 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
           <div>
             <label className="text-xs text-white/50">{ru.day.amount}</label>
-            <NumberInput
-              disabled={!isManualAmount}
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-2xl font-semibold disabled:opacity-70"
-              value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
-              onChange={handleAmountOverrideChange}
-            />
-            <p className={`mt-1 text-xs text-white/40 ${showNegativeAmountHint ? "" : "invisible"}`}>
-              {ru.day.hintNegativeAmount}
-            </p>
-            <p className="mt-1 text-sm text-white/50">{settings.currency}</p>
+            {/* Валюта в одной строке с числом: отдельным <p> в 24px под полем она
+                читалась как ещё одно поле. min-w-0 обязателен — без него flex-элемент
+                с длинным числом не сожмётся и вытолкнет валюту за край. */}
+            <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+              <NumberInput
+                disabled={!isManualAmount}
+                className="min-w-0 flex-1 bg-transparent py-3 text-2xl font-semibold outline-none disabled:opacity-70"
+                value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
+                onChange={handleAmountOverrideChange}
+              />
+              <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+            </div>
+            <p className={`mt-1 text-xs text-white/40 ${amountHint ? "" : "invisible"}`}>{amountHint ?? " "}</p>
           </div>
 
           <div>
@@ -470,11 +598,16 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
             />
           </div>
 
-          {entry && (
-            <button className="py-2 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
-              {ru.day.deleteEntry}
+          <div className="flex items-center justify-between gap-3">
+            <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleAddEntry}>
+              {ru.day.addEntry}
             </button>
-          )}
+            {entry && (
+              <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
+                {ru.day.deleteEntry}
+              </button>
+            )}
+          </div>
         </>
       )}
 

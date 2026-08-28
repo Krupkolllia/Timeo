@@ -146,6 +146,7 @@ vite.config.ts.timestamp-*
 dist-ssr/
 *.local
 TIMEO-SPEC.md
+TIMEO-FIX-PROMPT.md
 
 # Cloudflare
 .wrangler/
