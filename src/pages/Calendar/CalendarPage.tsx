@@ -16,6 +16,7 @@ import {
   type PeriodId,
 } from "@/lib/calc/period";
 import { buildWeeks, toISODate } from "@/lib/calc/calendarGrid";
+import { roundMoney } from "@/lib/calc/round";
 import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
@@ -82,6 +83,34 @@ export function CalendarPage() {
       .toArray();
   }, [range]);
 
+  // Предыдущий период — только для сравнения в панели итогов (раздел 7.1).
+  // getOrCreatePeriod здесь намеренно не вызывается: он создаёт строку при
+  // первом обращении (раздел 5.2), и календарь начал бы плодить пустые
+  // периоды назад по времени просто от пролистывания.
+  const previous = useMemo(() => (viewed ? getAdjacentPeriod(viewed.year, viewed.month, -1) : null), [viewed]);
+
+  const previousPeriod = useLiveQuery(
+    () =>
+      previous
+        ? db.periods.where("[user_id+year+month]").equals([userId, previous.year, previous.month]).first()
+        : undefined,
+    [previous],
+  );
+
+  const previousRange = useMemo(
+    () => (previous && settings ? getPeriodDateRange(previous.year, previous.month, settings.period_start_day) : null),
+    [previous, settings],
+  );
+
+  const previousEntries = useLiveQuery(async () => {
+    if (!previousRange) return [];
+    return db.entries
+      .where("date")
+      .between(toISODate(previousRange.start), toISODate(previousRange.end), true, true)
+      .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
+      .toArray();
+  }, [previousRange]);
+
   useEffect(() => {
     return () => {
       if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
@@ -117,6 +146,14 @@ export function CalendarPage() {
     if (!period) return null;
     return calculatePeriodTotals(period, entries ?? [], dayTypeById);
   }, [period, entries, dayTypeById]);
+
+  // Сравнение показываем только если предыдущий период реально существует:
+  // «+0» на первом же месяце использования дезинформирует.
+  const delta = useMemo(() => {
+    if (!previousPeriod || !totals) return null;
+    const previousTotals = calculatePeriodTotals(previousPeriod, previousEntries ?? [], dayTypeById);
+    return roundMoney(totals.amount - previousTotals.amount);
+  }, [previousPeriod, previousEntries, dayTypeById, totals]);
 
   if (!settings || !viewed || !range) {
     return (
@@ -196,8 +233,19 @@ export function CalendarPage() {
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
-        <div className="text-xs text-white/50">
-          {ru.calendar.remainingToNorm}: {totals ? totals.remaining_to_norm : "—"} {ru.calendar.hoursShort}
+        {/* Раздел 7.1: «строкой выше мелко: сравнение с прошлым периодом
+            (например «+340 zł») и остаток до нормы часов». Знак берётся из
+            значения, отдельного ключа в словаре ТЗ не предполагает. */}
+        <div className="flex items-baseline gap-3 text-xs text-white/50">
+          {delta !== null && (
+            <span>
+              {delta >= 0 ? "+" : "−"}
+              {Math.abs(delta).toFixed(2)} {settings.currency}
+            </span>
+          )}
+          <span>
+            {ru.calendar.remainingToNorm}: {totals ? totals.remaining_to_norm : "—"} {ru.calendar.hoursShort}
+          </span>
         </div>
         <div className="mt-1 flex items-baseline justify-between">
           <span className="text-2xl font-semibold">
