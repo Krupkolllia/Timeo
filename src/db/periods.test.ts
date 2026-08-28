@@ -67,4 +67,17 @@ describe("getOrCreatePeriod", () => {
     expect(january.base_rate).toBe(25);
     expect(january.norm_hours).toBe(168);
   });
+
+  it("never creates two rows when called concurrently for the same period", async () => {
+    const database = openDb();
+
+    const [first, second] = await Promise.all([
+      getOrCreatePeriod(database, "user-1", 2026, 1, settings),
+      getOrCreatePeriod(database, "user-1", 2026, 1, settings),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    const rows = await database.periods.where({ user_id: "user-1", year: 2026, month: 1 }).toArray();
+    expect(rows).toHaveLength(1);
+  });
 });

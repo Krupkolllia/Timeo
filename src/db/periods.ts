@@ -19,30 +19,35 @@ export async function getOrCreatePeriod(
   month: number,
   settings: Pick<Settings, "default_base_rate" | "default_norm_hours">,
 ): Promise<Period> {
-  const existing = await findPeriod(db, userId, year, month);
-  if (existing) return existing;
+  // Читаем и создаём в одной rw-транзакции: без этого два параллельных вызова
+  // (например, повторный вызов эффекта в React StrictMode) оба не находят
+  // период и создают по строке каждый, дублируя period на один year+month.
+  return db.transaction("rw", db.periods, async () => {
+    const existing = await findPeriod(db, userId, year, month);
+    if (existing) return existing;
 
-  const previousId = getAdjacentPeriod(year, month, -1);
-  const previous = await findPeriod(db, userId, previousId.year, previousId.month);
+    const previousId = getAdjacentPeriod(year, month, -1);
+    const previous = await findPeriod(db, userId, previousId.year, previousId.month);
 
-  const now = new Date().toISOString();
-  const period: Period = {
-    id: crypto.randomUUID(),
-    user_id: userId,
-    created_at: now,
-    updated_at: now,
-    deleted_at: null,
-    year,
-    month,
-    base_rate: previous ? previous.base_rate : settings.default_base_rate,
-    norm_hours: previous ? previous.norm_hours : settings.default_norm_hours,
-    extra_amount: 0,
-    extra_note: "",
-    is_closed: false,
-    closed_totals: null,
-    is_manual: false,
-  };
+    const now = new Date().toISOString();
+    const period: Period = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+      year,
+      month,
+      base_rate: previous ? previous.base_rate : settings.default_base_rate,
+      norm_hours: previous ? previous.norm_hours : settings.default_norm_hours,
+      extra_amount: 0,
+      extra_note: "",
+      is_closed: false,
+      closed_totals: null,
+      is_manual: false,
+    };
 
-  await db.periods.add(period);
-  return period;
+    await db.periods.add(period);
+    return period;
+  });
 }

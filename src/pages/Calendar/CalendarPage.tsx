@@ -45,7 +45,11 @@ export function CalendarPage() {
   useEffect(() => {
     if (!viewed || !settings) return;
     void getOrCreatePeriod(db, userId, viewed.year, viewed.month, settings);
-  }, [viewed, settings]);
+    // Зависим от конкретных полей, а не от объекта settings целиком — иначе
+    // любая несвязанная правка настроек (например, темы) меняет ссылку и
+    // лишний раз перезапускает поиск/создание периода.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours]);
 
   const period = useLiveQuery(
     () =>
@@ -55,15 +59,10 @@ export function CalendarPage() {
     [viewed],
   );
 
-  const dayTypes = useLiveQuery(
-    () =>
-      db.day_types
-        .where("user_id")
-        .equals(userId)
-        .filter((dayType) => !dayType.is_archived)
-        .sortBy("sort_order"),
-    [],
-  );
+  // Архивные типы дней остаются в этой карте: они всё ещё могут быть проставлены
+  // на прошлых днях, и итог периода должен продолжать считать их часы верно.
+  // Фильтровать is_archived нужно только там, где пользователь выбирает тип дня.
+  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).sortBy("sort_order"), []);
 
   const entries = useLiveQuery(async () => {
     if (!range) return [];
