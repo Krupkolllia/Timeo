@@ -6,7 +6,7 @@ Shift-tracking and payroll app. A PWA, added to the iPhone home screen through S
 
 React + TypeScript + Vite + Tailwind v4, Dexie (IndexedDB, primary storage), Zustand,
 react-router-dom, vite-plugin-pwa. Cloud — Supabase. Reminders and keep-alive —
-Cloudflare Workers. Hosting — Cloudflare Pages.
+Cloudflare Workers. Hosting — Cloudflare Workers (static assets, see `wrangler.jsonc`).
 
 ## Development
 
@@ -27,8 +27,8 @@ cp .env.example .env
 ```
 
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are only needed once Supabase sync is wired
-up — before that the app works fully offline without them. In Cloudflare Pages the same
-variables are set in the project settings (Settings → Environment variables), not in a file.
+up — before that the app works fully offline without them. In Cloudflare the same
+variables are set in the Worker's settings (Settings → Variables and Secrets), not in a file.
 
 ## Scripts
 
@@ -63,5 +63,5 @@ workers/        Cloudflare Workers: reminders, keep-alive
 
 ## Deployment
 
-Cloudflare Pages, auto-deploys from this repository on push to `main`. Build command —
-`npm run build`, output directory — `dist`.
+Cloudflare Workers (Workers Builds), auto-deploys from this repository on push to `main`.
+Build command — `npm run build`, assets directory — `dist` (`wrangler.jsonc`).

@@ -13,13 +13,12 @@ const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "ut
  * при превью-деплоях веток совпадает у разных сборок — хеш меняется всегда,
  * поэтому на экране показываем пару.
  *
- * Прод собирается на стороне Cloudflare, а не в GitHub Actions, поэтому
- * GITHUB_SHA там недоступен. Порядок: Workers Builds → Pages → GitHub Actions
- * (сборка в CI) → локальный git.
+ * Прод собирается на стороне Cloudflare (Workers Builds, см. wrangler.jsonc),
+ * а не в GitHub Actions, поэтому GITHUB_SHA там недоступен. Порядок:
+ * Workers Builds → GitHub Actions (сборка в CI) → локальный git.
  */
 function resolveCommitSha(): string {
-  const fromEnv =
-    process.env.WORKERS_CI_COMMIT_SHA ?? process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA;
+  const fromEnv = process.env.WORKERS_CI_COMMIT_SHA ?? process.env.GITHUB_SHA;
   if (fromEnv) return fromEnv.slice(0, 7);
 
   try {
