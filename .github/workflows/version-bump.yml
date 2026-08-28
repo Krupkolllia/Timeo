@@ -1,0 +1,51 @@
+name: Version bump
+
+# Инкремент на открытии PR, а не на мерже в main: на main настроен ruleset,
+# и пуш туда из workflow потребовал бы обхода защиты и отдельного токена.
+# Пуш в ветку PR такой проблемы не создаёт и даёт правильный номер уже в
+# превью-деплое, который и тестируется на устройстве.
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Один инкремент на PR, а не на каждый пуш: если версия в ветке уже
+      # отличается от main, для этого PR она уже поднята — выходим.
+      - name: Skip if already bumped
+        id: check
+        run: |
+          git fetch origin main --depth=1
+          BRANCH_VERSION=$(node -p "require('./package.json').version")
+          MAIN_VERSION=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          echo "branch=$BRANCH_VERSION main=$MAIN_VERSION"
+          if [ "$BRANCH_VERSION" != "$MAIN_VERSION" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Пуш штатным GITHUB_TOKEN намеренно не запускает новые workflow-раны,
+      # поэтому цикла bump → synchronize → bump не будет.
+      - name: Bump patch version
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          npm version patch --no-git-tag-version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $(node -p "require('./package.json').version")"
+          git push origin HEAD:${{ github.head_ref }}

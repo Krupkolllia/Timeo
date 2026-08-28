@@ -185,6 +185,13 @@ export function CalendarPage() {
             })}
           </div>
         ))}
+
+        {/* Временный индикатор сборки: тестирование идёт удалённо (раздел 12 ТЗ), и без него
+            неотличимо «баг не исправлен» от «на телефоне закешировалась старая версия».
+            Переехать в экран настроек (раздел 7.4), когда тот появится в блоке 6. */}
+        <p className="mt-auto pt-4 text-center text-[10px] text-white/25">
+          v{__APP_VERSION__}{__BUILD_SHA__ && ` · ${__BUILD_SHA__}`}
+        </p>
       </div>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur">
