@@ -293,8 +293,18 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   const sourceLabel = showMultiplierSourceLabel ? multiplierSourceLabel(multiplierResult.source) : null;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
-  const showNegativeAmountHint = (draft?.amount ?? 0) < 0;
   const showZeroRateHint = dayType?.pay_mode === "hourly" && !isManualAmount && (draft?.rate_per_hour ?? 0) === 0;
+
+  // Раздел 6.1: unpaid всегда даёт 0, и множитель со ставкой на результат не
+  // влияют. Раздел 8 запрещает запрещать — поля остаются редактируемыми
+  // (осознанное решение коммита 8dec465), но приглушаются, а под суммой
+  // появляется объяснение, откуда ноль. Прозрачность вместо запрета.
+  const isUnpaidWithoutOverride = dayType?.pay_mode === "unpaid" && !isManualAmount;
+  const amountHint = isUnpaidWithoutOverride
+    ? ru.day.hintUnpaidDayType
+    : (draft?.amount ?? 0) < 0
+      ? ru.day.hintNegativeAmount
+      : null;
 
   return (
     <div className="flex max-h-[85vh] flex-col gap-4 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
@@ -353,7 +363,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               pins amount at 0 per section 6.1 of the spec; only fixed_amount types
               fall back to the placeholder plate. */}
           {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid grid-cols-2 gap-3 ${isUnpaidWithoutOverride ? "opacity-60" : ""}`}>
               <div>
                 <label className="text-xs text-white/50">{ru.day.multiplier}</label>
                 <NumberInput
@@ -447,16 +457,19 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
           <div>
             <label className="text-xs text-white/50">{ru.day.amount}</label>
-            <NumberInput
-              disabled={!isManualAmount}
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-2xl font-semibold disabled:opacity-70"
-              value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
-              onChange={handleAmountOverrideChange}
-            />
-            <p className={`mt-1 text-xs text-white/40 ${showNegativeAmountHint ? "" : "invisible"}`}>
-              {ru.day.hintNegativeAmount}
-            </p>
-            <p className="mt-1 text-sm text-white/50">{settings.currency}</p>
+            {/* Валюта в одной строке с числом: отдельным <p> в 24px под полем она
+                читалась как ещё одно поле. min-w-0 обязателен — без него flex-элемент
+                с длинным числом не сожмётся и вытолкнет валюту за край. */}
+            <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+              <NumberInput
+                disabled={!isManualAmount}
+                className="min-w-0 flex-1 bg-transparent py-3 text-2xl font-semibold outline-none disabled:opacity-70"
+                value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
+                onChange={handleAmountOverrideChange}
+              />
+              <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+            </div>
+            <p className={`mt-1 text-xs text-white/40 ${amountHint ? "" : "invisible"}`}>{amountHint ?? " "}</p>
           </div>
 
           <div>
@@ -471,7 +484,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
           </div>
 
           {entry && (
-            <button className="py-2 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
+            <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
               {ru.day.deleteEntry}
             </button>
           )}

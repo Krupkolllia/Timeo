@@ -16,6 +16,7 @@ import {
   type PeriodId,
 } from "@/lib/calc/period";
 import { buildWeeks, toISODate } from "@/lib/calc/calendarGrid";
+import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
@@ -224,7 +225,7 @@ export function CalendarPage() {
         <div className="fixed inset-0 z-10 flex items-end bg-black/50" onClick={() => setOpenDayDate(null)}>
           <div className="w-full rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" />
-            <p className="mb-2 text-sm text-white/50">{openDayDate}</p>
+            <p className="mb-2 text-sm text-white/50">{formatDayTitle(openDayDate)}</p>
             <DayScreen
               date={openDayDate}
               userId={userId}
