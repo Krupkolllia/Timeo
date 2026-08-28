@@ -1,6 +1,10 @@
 export const ru = {
   app: {
     name: "Timeo",
+    updateAvailable: "Доступно обновление — нажмите, чтобы перезапустить",
+  },
+  settings: {
+    version: "Версия",
   },
   calendar: {
     title: "Календарь",
