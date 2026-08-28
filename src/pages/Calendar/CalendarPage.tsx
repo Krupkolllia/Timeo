@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
 import { getOrCreatePeriod } from "@/db/periods";
+import { listActiveEntriesForDate, restoreEntry } from "@/db/entries";
+import type { Entry } from "@/types/models";
 import {
   calculatePeriodTotals,
   getAdjacentPeriod,
@@ -24,6 +26,11 @@ export function CalendarPage() {
   const [viewed, setViewed] = useState<PeriodId | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [openDayDate, setOpenDayDate] = useState<string | null>(null);
+  // Плашка "отменить" живёт на уровне календаря, а не внутри bottom sheet:
+  // удаление записи закрывает экран дня сразу, и окно отмены (раздел 8 ТЗ)
+  // должно пережить это закрытие, а не исчезать вместе с диалогом.
+  const [pendingUndo, setPendingUndo] = useState<Entry | null>(null);
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
 
@@ -70,9 +77,37 @@ export function CalendarPage() {
     return db.entries
       .where("date")
       .between(toISODate(range.start), toISODate(range.end), true, true)
-      .filter((entry) => entry.user_id === userId)
+      .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
       .toArray();
   }, [range]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    };
+  }, []);
+
+  function handleEntryDeleted(entry: Entry) {
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    setPendingUndo(entry);
+    undoTimeoutRef.current = setTimeout(() => setPendingUndo(null), 5000);
+  }
+
+  async function handleUndoDelete() {
+    if (!pendingUndo) return;
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    // Пока была открыта плашка "отменить", пользователь мог зайти на тот же
+    // день и создать новую запись поверх удалённой. В этом узком случае не
+    // восстанавливаем старую — иначе на дату окажется две активные записи, и
+    // calculatePeriodTotals задвоит сумму/часы за день. Компромисс: удалённая
+    // запись остаётся удалённой, а свежесозданная — единственный источник
+    // истины за эту дату.
+    const alreadyReplaced = (await listActiveEntriesForDate(db, pendingUndo.user_id, pendingUndo.date)).length > 0;
+    if (!alreadyReplaced) {
+      await restoreEntry(db, pendingUndo.id);
+    }
+    setPendingUndo(null);
+  }
 
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
   const entryByDate = useMemo(() => new Map((entries ?? []).map((entry) => [entry.date, entry])), [entries]);
@@ -178,13 +213,30 @@ export function CalendarPage() {
         />
       )}
 
-      {openDayDate && (
+      {openDayDate && period && dayTypes && (
         <div className="fixed inset-0 z-10 flex items-end bg-black/50" onClick={() => setOpenDayDate(null)}>
           <div className="w-full rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" />
-            <p className="text-sm text-white/50">{openDayDate}</p>
-            <DayScreen />
+            <p className="mb-2 text-sm text-white/50">{openDayDate}</p>
+            <DayScreen
+              date={openDayDate}
+              userId={userId}
+              dayTypes={dayTypes}
+              period={period}
+              settings={settings}
+              onClose={() => setOpenDayDate(null)}
+              onEntryDeleted={handleEntryDeleted}
+            />
           </div>
+        </div>
+      )}
+
+      {pendingUndo && (
+        <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] z-30 flex items-center justify-between rounded-xl bg-slate-800 px-4 py-3 shadow-lg">
+          <span className="text-sm">{ru.day.deletedNotice}</span>
+          <button className="text-sm font-semibold text-app-accent" onClick={handleUndoDelete}>
+            {ru.day.undo}
+          </button>
         </div>
       )}
     </div>
