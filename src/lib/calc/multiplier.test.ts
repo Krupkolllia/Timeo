@@ -76,7 +76,15 @@ describe("resolveMultiplier", () => {
     const dayType = makeDayType({ ignore_auto_multipliers: true, default_multiplier: 1 });
     // Sunday + holiday, both would normally apply, but the day type opts out (vacation on a holiday).
     const result = resolveMultiplier(new Date(2026, 0, 4), dayType, makeHoliday(), weekendMultipliers);
-    expect(result).toEqual({ value: 1, source: "day_type_ignore" });
+    // ×1 is labelled "default": suppression still happened (value stays 1 rather
+    // than the sunday/holiday multiplier), but "тип дня, ×1" carries no information.
+    expect(result).toEqual({ value: 1, source: "default" });
+  });
+
+  it("still reports day_type_ignore when the opted-out day type has a multiplier of its own", () => {
+    const dayType = makeDayType({ ignore_auto_multipliers: true, default_multiplier: 0.8 });
+    const result = resolveMultiplier(new Date(2026, 0, 4), dayType, makeHoliday(), weekendMultipliers);
+    expect(result).toEqual({ value: 0.8, source: "day_type_ignore" });
   });
 
   it("never multiplies rules together — sunday + day type multiplier does not compound", () => {

@@ -5,6 +5,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } from "@/db/entries";
 import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
+import { roundMultiplier } from "@/lib/calc/round";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
 
@@ -256,14 +257,28 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    // Правка ставки фиксирует rate_is_manual=true — множитель остаётся как есть,
-    // чисто для истории/отображения (раздел 3 ТЗ).
+    // Раздел 3 ТЗ: поля связаны в обе стороны. Ставка, введённая руками, задаёт
+    // множитель = ставка / базовая ставка периода — иначе на экране остаётся пара
+    // «×2 и 50 zł», которая при base_rate 33.3 не может быть верной одновременно.
+    // При базовой ставке 0 делить не на что — множитель оставляем как есть.
+    const multiplier = period.base_rate !== 0 ? roundMultiplier(rate / period.base_rate) : draft.multiplier;
+    // rate_is_manual=true сохраняется: по разделу 6.1 вписанная пользователем
+    // ставка перестаёт зависеть от base_rate, и calculateEntryAmount возьмёт
+    // именно её, а не пересчитает из множителя. Множитель здесь — производное
+    // значение для отображения и истории.
     const { amount, rate_per_hour } = calculateEntryAmount(
-      { ...draft, rate_per_hour: rate, rate_is_manual: true },
+      { ...draft, multiplier, rate_per_hour: rate, rate_is_manual: true },
       dayType,
       period,
     );
-    void persist({ ...draft, rate_is_manual: true, rate_per_hour, amount, rate_source: mapRateSource("default", true) });
+    void persist({
+      ...draft,
+      multiplier,
+      rate_is_manual: true,
+      rate_per_hour,
+      amount,
+      rate_source: mapRateSource("default", true),
+    });
   }
 
   function handleNoteChange(note: string) {
@@ -304,11 +319,19 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   }
 
   const isManualAmount = draft?.amount_override !== null && draft?.amount_override !== undefined;
-  const multiplierResult = dayType
+  const autoMultiplier = dayType
     ? resolveMultiplier(parsedDate, dayType, holiday, settings.weekend_multipliers)
     : null;
-  const showMultiplierSourceLabel = multiplierResult && draft && multiplierResult.value === draft.multiplier;
-  const sourceLabel = showMultiplierSourceLabel ? multiplierSourceLabel(multiplierResult.source) : null;
+  // Раздел 6.2: значение видно всегда. Если оно разошлось с автоматическим
+  // правилом — значит, его задали руками, и это тоже источник, а не повод
+  // молчать. Раньше подпись получала класс invisible ровно в тот момент,
+  // когда пользователь задавал множитель сам.
+  const sourceLabel =
+    !autoMultiplier || !draft
+      ? null
+      : autoMultiplier.value === draft.multiplier
+        ? multiplierSourceLabel(autoMultiplier.source)
+        : ru.day.multiplierSourceManual;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
   const showZeroRateHint = dayType?.pay_mode === "hourly" && !isManualAmount && (draft?.rate_per_hour ?? 0) === 0;
@@ -392,8 +415,10 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
                   value={draft.multiplier}
                   onChange={handleMultiplierChange}
                 />
-                <p className={`mt-1 text-xs text-white/40 ${sourceLabel ? "" : "invisible"}`}>
-                  {sourceLabel ?? " "}, ×{draft.multiplier}
+                {/* Строка видна всегда, поэтому резервировать высоту через
+                    invisible больше не нужно — скачков вёрстки не будет. */}
+                <p className="mt-1 text-xs text-white/40">
+                  {sourceLabel ? `${sourceLabel}, ×${draft.multiplier}` : `×${draft.multiplier}`}
                 </p>
               </div>
               <div>

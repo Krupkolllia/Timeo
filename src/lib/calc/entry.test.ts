@@ -176,7 +176,9 @@ describe("buildEntryDefaultsForDayType", () => {
     const result = buildEntryDefaultsForDayType(new Date(2026, 0, 1), dayType, period, holiday, weekendMultipliers);
 
     expect(result.multiplier).toBe(1);
-    expect(result.multiplier_source).toBe("day_type_ignore");
-    expect(result.rate_source).toBe("day_type_default");
+    // Подавление сработало (множитель праздника 2.5 не применён), но ×1 не
+    // подписывается как множитель типа дня — см. resolveMultiplier.
+    expect(result.multiplier_source).toBe("default");
+    expect(result.rate_source).toBe("period_base");
   });
 });
