@@ -81,16 +81,22 @@ export function planRateChange(input: RateChangePlanInput): EntryRatePatch[] {
     }
 
     const { amount, rate_per_hour } = calculateEntryAmount(entry, dayType, { base_rate: input.newBaseRate });
-    if (amount === entry.amount && rate_per_hour === entry.rate_per_hour) continue;
+    // rate_source после пересчёта всегда "period_base": ставка этой записи
+    // только что выведена из базовой ставки периода, и инвариант 15 требует,
+    // чтобы поле описывало, как число реально получилось. На записях,
+    // созданных до отделения множителя от ставки, здесь лежат "weekend_rule" /
+    // "holiday_rule" / "day_type_default" — они объясняли ставку в старой
+    // модели и после пересчёта становятся прямой неправдой.
+    const rate_source: RateSource = "period_base";
+    if (amount === entry.amount && rate_per_hour === entry.rate_per_hour && rate_source === entry.rate_source)
+      continue;
 
     patches.push({
       id: entry.id,
       rate_per_hour,
       amount,
       rate_is_manual: false,
-      // rate_source описывает происхождение множителя (праздник/выходной/тип
-      // дня), а множитель пересчёт не трогает — источник остаётся прежним.
-      rate_source: entry.rate_source,
+      rate_source,
     });
   }
 

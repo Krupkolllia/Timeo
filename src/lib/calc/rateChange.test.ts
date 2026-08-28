@@ -214,4 +214,35 @@ describe("planRateChange — применение с даты", () => {
     expect(patches[0].rate_is_manual).toBe(false);
     expect(patches[0].amount).toBe(320);
   });
+
+  it("rewrites rate_source to period_base on recalculated entries (invariant 15)", () => {
+    // Запись, созданная до отделения множителя от ставки: источником ставки
+    // тогда считалось правило выходного дня. После пересчёта ставка выведена
+    // из базовой ставки периода, и старая подпись описывала бы не то число.
+    const legacy = entry({ id: "e1", date: "2026-03-10", rate_source: "weekend_rule" });
+    const patches = plan("recalculate_period", [legacy]);
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0].rate_source).toBe("period_base");
+    expect(patches[0].rate_per_hour).toBe(40);
+  });
+
+  it("emits a patch for a stale rate_source even when the numbers do not change", () => {
+    // Ставка та же — меняется только подпись о её происхождении. Без патча
+    // запись навсегда осталась бы с чужим rate_source.
+    const legacy = entry({ id: "e1", date: "2026-03-10", rate_source: "day_type_default" });
+    const patches = plan("recalculate_period", [legacy], 30);
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0].amount).toBe(240);
+    expect(patches[0].rate_source).toBe("period_base");
+  });
+
+  it("stays idempotent after the rate_source rewrite (invariant 13)", () => {
+    const legacy = entry({ id: "e1", date: "2026-03-10", rate_source: "holiday_rule" });
+    const first = plan("recalculate_period", [legacy]);
+    const second = plan("recalculate_period", applyPatches([legacy], first));
+
+    expect(second).toEqual([]);
+  });
 });
