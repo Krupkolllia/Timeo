@@ -36,7 +36,12 @@ export function NumberInput({ value, onChange, className, inputMode = "decimal",
       value={text}
       onFocus={(e) => e.target.select()}
       onChange={(e) => {
-        const next = e.target.value;
+        // На русской и польской раскладке iOS десятичная клавиша на цифровой
+        // панели — запятая, а не точка. Без этой замены «8,5» не проходит
+        // проверку ниже, поле молча откатывается, и единственный способ ввести
+        // дробное число выглядит как сломанная клавиатура. Раздел 9: пассивное
+        // бездействие без объяснения — тот же запрет, только незаметный.
+        const next = e.target.value.replace(",", ".");
         if (!IN_PROGRESS_NUMBER.test(next)) {
           // Rejecting by simply not calling setText leaves this controlled
           // input's real DOM value at whatever the browser just wrote (e.g. a

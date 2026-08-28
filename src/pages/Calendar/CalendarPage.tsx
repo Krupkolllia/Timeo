@@ -183,7 +183,9 @@ export function CalendarPage() {
         >
           ‹
         </button>
-        <button className="text-lg font-semibold tracking-tight" onClick={() => setPickerOpen(true)}>
+        {/* py-3 поднимает цель нажатия до 44px: это вход в выбор месяца и года,
+            а сам текст ростом всего 28px (инвариант 59). */}
+        <button className="px-2 py-3 text-lg font-semibold tracking-tight" onClick={() => setPickerOpen(true)}>
           {ru.calendar.monthNames[label.month - 1]} {label.year}
         </button>
         <button
@@ -237,7 +239,10 @@ export function CalendarPage() {
                     </span>
                   )}
                   {dayHours > 0 && (
-                    <span className="text-[10px] text-white/50">
+                    // max-w-full + truncate: ячейка шириной 50px, и число часов
+                    // в несколько цифр иначе вылезает на соседние дни
+                    // (инвариант 26 — большие значения не ломают вёрстку).
+                    <span className="max-w-full truncate text-[10px] text-white/50">
                       {dayHours}
                       {ru.calendar.hoursShort}
                     </span>
