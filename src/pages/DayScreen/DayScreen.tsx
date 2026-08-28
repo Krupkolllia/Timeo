@@ -145,11 +145,28 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   // instead of silently discarding them for the new type's defaults.
   const hasEditedRef = useRef(false);
 
+  // Запись, созданную этим же экраном, отличаем от записи, приехавшей извне.
+  // Отдельный ref, а не entryIdRef: тот синхронизируется эффектом выше, который
+  // объявлен раньше и успевает отработать первым — проверка стала бы всегда истинной.
+  const selfCreatedIdRef = useRef<string | null>(null);
+
+  // Флаг «пользователь уже вводил значения» живёт на время посещения дня, а не
+  // строки в базе: первый же ввод создаёт запись и меняет entry.id, и общий
+  // эффект инициализации сбрасывал бы флаг ровно тогда, когда вводить начали.
+  useEffect(() => {
+    hasEditedRef.current = false;
+    selfCreatedIdRef.current = null;
+  }, [date]);
+
   // Инициализация/переключение черновика — только когда меняется сама запись
   // (её id) или выбранный день, а не при каждом чтении из Dexie: иначе
   // собственная запись экрана эхом прилетала бы обратно и перетирала то, что
   // пользователь только что набирает в поле.
   useEffect(() => {
+    // Собственная только что созданная запись — черновик уже актуален, повторная
+    // инициализация затёрла бы то, что пользователь набирает прямо сейчас.
+    if (entry && entry.id === selfCreatedIdRef.current) return;
+
     if (entry) {
       setDraft(entryToDraft(entry));
     } else if (activeDayTypes.length > 0) {
@@ -164,7 +181,6 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     } else {
       setDraft(null);
     }
-    hasEditedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry?.id, date]);
 
@@ -183,6 +199,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
       entryIdRef.current = created.id;
+      selfCreatedIdRef.current = created.id;
       await updateEntry(db, created.id, next);
       return;
     }
@@ -191,6 +208,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     creatingRef.current = promise;
     const created = await promise;
     entryIdRef.current = created.id;
+    selfCreatedIdRef.current = created.id;
     creatingRef.current = null;
   }
 
