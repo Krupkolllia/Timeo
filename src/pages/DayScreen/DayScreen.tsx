@@ -138,6 +138,13 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     entryIdRef.current = entry?.id ?? null;
   }, [entry?.id]);
 
+  // Tracks whether the user has typed something into this screen visit before
+  // switching day types. Untouched, a type tap should apply that type's own
+  // defaults (that's the whole point of the button); once the user has entered
+  // hours/multiplier/rate themselves, switching type must carry those over
+  // instead of silently discarding them for the new type's defaults.
+  const hasEditedRef = useRef(false);
+
   // Инициализация/переключение черновика — только когда меняется сама запись
   // (её id) или выбранный день, а не при каждом чтении из Dexie: иначе
   // собственная запись экрана эхом прилетала бы обратно и перетирала то, что
@@ -157,6 +164,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     } else {
       setDraft(null);
     }
+    hasEditedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry?.id, date]);
 
@@ -187,18 +195,30 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   }
 
   function handleSelectDayType(dt: DayType) {
-    const defaults = buildEntryDefaultsForDayType(parsedDate, dt, period, holiday, settings.weekend_multipliers);
-    void persist(draftFromDefaults(dt.id, defaults));
+    if (!hasEditedRef.current) {
+      const defaults = buildEntryDefaultsForDayType(parsedDate, dt, period, holiday, settings.weekend_multipliers);
+      void persist(draftFromDefaults(dt.id, defaults));
+      return;
+    }
+    // The user already typed hours/multiplier/rate for this day before tapping
+    // another type — keep those instead of overwriting them with the new
+    // type's defaults, only day_type_id and the pay_mode-dependent amount change.
+    if (!draft) return;
+    const next = { ...draft, day_type_id: dt.id };
+    const { amount, rate_per_hour } = calculateEntryAmount(next, dt, period);
+    void persist({ ...next, amount, rate_per_hour });
   }
 
   function handleHoursChange(hours: number) {
     if (!draft || !dayType) return;
+    hasEditedRef.current = true;
     const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, hours }, dayType, period);
     void persist({ ...draft, hours, amount, rate_per_hour });
   }
 
   function handleMultiplierChange(multiplier: number) {
     if (!draft || !dayType) return;
+    hasEditedRef.current = true;
     // Раздел 3 ТЗ: правка множителя переводит ставку в авто-режим и пересчитывает
     // её из base_rate периода — источник истины всегда base_rate × multiplier.
     const { amount, rate_per_hour } = calculateEntryAmount(
@@ -217,6 +237,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
+    hasEditedRef.current = true;
     // Правка ставки фиксирует rate_is_manual=true — множитель остаётся как есть,
     // чисто для истории/отображения (раздел 3 ТЗ).
     const { amount, rate_per_hour } = calculateEntryAmount(
@@ -229,11 +250,13 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
   function handleNoteChange(note: string) {
     if (!draft) return;
+    hasEditedRef.current = true;
     void persist({ ...draft, note });
   }
 
   function handleToggleManualAmount(enabled: boolean) {
     if (!draft || !dayType) return;
+    hasEditedRef.current = true;
     if (enabled) {
       void persist({ ...draft, amount_override: draft.amount });
       return;
@@ -244,12 +267,14 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
   function handleAmountOverrideChange(value: number) {
     if (!draft || !dayType) return;
+    hasEditedRef.current = true;
     const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, amount_override: value }, dayType, period);
     void persist({ ...draft, amount_override: value, amount, rate_per_hour });
   }
 
   function handleShiftTimeChange(patch: Partial<Pick<EntryDraft, "start_time" | "end_time" | "break_minutes">>) {
     if (!draft) return;
+    hasEditedRef.current = true;
     void persist({ ...draft, ...patch });
   }
 
@@ -322,8 +347,12 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
 
           {/* Always rendered at the same height regardless of pay_mode — otherwise
               the sheet visibly grows/shrinks every time a different day type is
-              tapped, since hourly types show two inputs and others show nothing. */}
-          {dayType.pay_mode === "hourly" ? (
+              tapped, since hourly types show two inputs and others show nothing.
+              unpaid types (Отгул, Выходной) also get the multiplier/rate inputs —
+              the user wants the fields available even though pay_mode=unpaid still
+              pins amount at 0 per section 6.1 of the spec; only fixed_amount types
+              fall back to the placeholder plate. */}
+          {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-white/50">{ru.day.multiplier}</label>
@@ -349,14 +378,10 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
               </div>
             </div>
           ) : (
-            // Unpaid day types (day off, time off) don't need to say so — the name
-            // already makes that obvious; only reserve the height so the sheet
-            // doesn't resize when switching away from an hourly type.
-            <div
-              className={`flex min-h-[92px] items-start rounded-lg px-3 py-2 text-sm text-white/50 ${
-                dayType.pay_mode === "unpaid" ? "invisible" : "bg-white/5"
-              }`}
-            >
+            // Only fixed_amount types land here now (hourly and unpaid both use
+            // the grid above) — min-h keeps this plate's height close enough to
+            // the grid's that the sheet doesn't visibly jump when switching.
+            <div className="flex min-h-[92px] items-start rounded-lg bg-white/5 px-3 py-2 text-sm text-white/50">
               {ru.day.payModeFixedAmount}
             </div>
           )}

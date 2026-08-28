@@ -37,7 +37,15 @@ export function NumberInput({ value, onChange, className, inputMode = "decimal",
       onFocus={(e) => e.target.select()}
       onChange={(e) => {
         const next = e.target.value;
-        if (!IN_PROGRESS_NUMBER.test(next)) return;
+        if (!IN_PROGRESS_NUMBER.test(next)) {
+          // Rejecting by simply not calling setText leaves this controlled
+          // input's real DOM value at whatever the browser just wrote (e.g. a
+          // pasted "1,5" or "1e5") — React only reconciles value back to `text`
+          // on the next render, and nothing here triggers one since state
+          // didn't change. Writing the DOM value back directly closes that gap.
+          e.target.value = text;
+          return;
+        }
         setText(next);
 
         // "" and "-" are not numbers yet — propagating them as 0 would stomp on
