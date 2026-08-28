@@ -6,6 +6,7 @@ import { createEntry, listActiveEntriesForDate, softDeleteEntry, updateEntry } f
 import { buildEntryDefaultsForDayType, calculateEntryAmount, mapRateSource, type EntryDefaults } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
 import { roundMultiplier } from "@/lib/calc/round";
+import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
 
@@ -13,9 +14,13 @@ interface DayScreenProps {
   date: string;
   userId: string;
   dayTypes: DayType[];
-  period: Pick<Period, "base_rate">;
+  period: Pick<Period, "base_rate" | "is_closed">;
   settings: Pick<Settings, "show_shift_times" | "currency" | "weekend_multipliers">;
   onClose: () => void;
+  // Инвариант 2: закрытый период неизменяем, и отказ должен нести объяснение и
+  // предложение открыть период заново. Само переоткрытие живёт на экране
+  // периода (там же подтверждение) — шторка только уводит туда.
+  onOpenPeriod: () => void;
   // Плашку "отменить" рисует CalendarPage, а не сам bottom sheet: удаление
   // закрывает экран дня сразу, и если undo-таймер жил бы только в DayScreen,
   // закрытие листа уносило бы с собой единственную кнопку отмены (раздел 8 ТЗ
@@ -103,7 +108,16 @@ function multiplierSourceLabel(source: MultiplierResult["source"]): string | nul
   }
 }
 
-export function DayScreen({ date, userId, dayTypes, period, settings, onClose, onEntryDeleted }: DayScreenProps) {
+export function DayScreen({
+  date,
+  userId,
+  dayTypes,
+  period,
+  settings,
+  onClose,
+  onEntryDeleted,
+  onOpenPeriod,
+}: DayScreenProps) {
   const activeDayTypes = useMemo(
     () => [...dayTypes].filter((dt) => !dt.is_archived).sort((a, b) => a.sort_order - b.sort_order),
     [dayTypes],
@@ -146,7 +160,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
   // createEntry() резолвится и useLiveQuery увидит новую запись — оба вызова
   // видят entry === undefined и оба создают строку, задваивая запись за день.
   const entryIdRef = useRef<string | null>(entry?.id ?? null);
-  const creatingRef = useRef<Promise<Entry> | null>(null);
+  const creatingRef = useRef<Promise<Entry | null> | null>(null);
   useEffect(() => {
     entryIdRef.current = entry?.id ?? null;
   }, [entry?.id]);
@@ -216,6 +230,7 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
       // Создание уже в полёте (предыдущий вызов persist ещё не резолвился) —
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
+      if (!created) return;
       entryIdRef.current = created.id;
       draftEntryIdRef.current = created.id;
       await updateEntry(db, created.id, next);
@@ -225,9 +240,13 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     const promise = createEntry(db, { ...next, user_id: userId, date });
     creatingRef.current = promise;
     const created = await promise;
+    creatingRef.current = null;
+    // null — период закрыли, пока запись создавалась, и слой данных отказал
+    // (инвариант 2). Возвращать черновик не нужно: useLiveQuery уже везёт
+    // закрытый период, и шторка через кадр перерисуется в режим чтения.
+    if (!created) return;
     entryIdRef.current = created.id;
     draftEntryIdRef.current = created.id;
-    creatingRef.current = null;
     // Только что созданная запись становится выбранной: иначе на дне с
     // несколькими записями экран продолжил бы показывать первую.
     setSelectedEntryId(created.id);
@@ -396,6 +415,51 @@ export function DayScreen({ date, userId, dayTypes, period, settings, onClose, o
     : (draft?.amount ?? 0) < 0
       ? ru.day.hintNegativeAmount
       : null;
+
+  // Закрытый период (инвариант 2) — отдельная ветка рендера, а не disabled на
+  // каждом поле: половина полей всё равно осталась бы кликабельной (переключатель
+  // ручной суммы, кнопки типа дня, «удалить запись»), а лист из неактивных
+  // контролов ничего не объясняет. Читаемая расшифровка дня плюс путь к
+  // переоткрытию честнее и короче.
+  if (period.is_closed) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+        <p className="rounded-lg bg-white/5 px-3 py-2 text-sm text-white/60">{ru.day.closedPeriodNotice}</p>
+
+        {/* entries === undefined — это «ещё читаем из Dexie», а не «записей нет»:
+            иначе шторка на кадр показывает «за этот день записей нет» и тут же
+            подменяет его списком. */}
+        {entries && entries.length === 0 && <p className="text-sm text-white/40">{ru.day.closedPeriodEmpty}</p>}
+        {entries && entries.length > 0 && (
+          <ul className="flex flex-col divide-y divide-white/5">
+            {entries.map((e) => (
+              <li key={e.id} className="flex items-start justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{dayTypeById.get(e.day_type_id)?.name ?? "—"}</p>
+                  <p className="truncate text-xs text-white/40">
+                    {formatEntryDetail(e, dayTypeById.get(e.day_type_id)?.pay_mode)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm tabular-nums">
+                  {e.amount.toFixed(2)} {settings.currency}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button
+          className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+          onClick={onOpenPeriod}
+        >
+          {ru.day.closedPeriodAction}
+        </button>
+        <button className="min-h-11 rounded-lg bg-white/5 py-3 text-sm active:bg-white/10" onClick={onClose}>
+          {ru.day.close}
+        </button>
+      </div>
+    );
+  }
 
   return (
     // min-h-0 обязателен: без него flex-элемент не сжимается ниже своего

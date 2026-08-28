@@ -15,6 +15,12 @@ export interface WeekendMultipliers {
   holiday: number;
 }
 
+/** Ссылка на период по его устойчивому идентификатору (раздел 5.2). */
+export interface PeriodRef {
+  year: number;
+  month: number;
+}
+
 export interface Settings extends BaseRecord {
   currency: string;
   period_start_day: number;
@@ -28,6 +34,14 @@ export interface Settings extends BaseRecord {
   weekend_multipliers: WeekendMultipliers;
   default_base_rate: number;
   default_norm_hours: number;
+  /**
+   * С какого периода default_base_rate начинает действовать. Заполняется
+   * режимом «применить со следующего периода» (раздел 6.6): без этой отметки
+   * значение не может «подхватиться при создании следующего периода», потому
+   * что по разделу 5.2 новый период копирует ставку у предыдущего и до
+   * default_base_rate дело не доходит вовсе.
+   */
+  default_base_rate_from_period: PeriodRef | null;
   preferred_rate_change_mode: RateChangeMode | null;
 }
 
@@ -72,7 +86,12 @@ export type RateSource =
   | "weekend_rule"
   | "holiday_rule"
   | "day_type_default"
-  | "manual";
+  | "manual"
+  // Раздел 6.6: ставка заморожена системой при смене базовой ставки «с даты».
+  // Отличается от "manual" (пользователь вписал число сам) только
+  // происхождением, но на экране расшифровки это разные истории, и раздел
+  // 5.4 требует, чтобы rate_source описывал, как число реально получилось.
+  | "frozen";
 
 export type RateChangeMode = "recalculate_period" | "apply_from_date" | "apply_next_period";
 

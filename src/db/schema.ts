@@ -44,5 +44,19 @@ export class TimeoDB extends Dexie {
           entry.multiplier = roundMultiplier(entry.multiplier);
         }),
     );
+    // На устройствах, открывавших приложение раньше, в строке settings нет
+    // поля default_base_rate_from_period, и чтение дало бы undefined там, где
+    // код ждёт PeriodRef | null. Заполняем явным null.
+    //
+    // updated_at, как и в version(3), намеренно не трогаем: иначе при появлении
+    // синхронизации (блок 8) настройки уедут в облако как «изменённые».
+    this.version(4).upgrade((tx) =>
+      tx
+        .table("settings")
+        .toCollection()
+        .modify((settings: Settings) => {
+          settings.default_base_rate_from_period = settings.default_base_rate_from_period ?? null;
+        }),
+    );
   }
 }
