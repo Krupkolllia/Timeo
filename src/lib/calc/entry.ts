@@ -1,11 +1,14 @@
 import type { DayType, Entry, Holiday, Period, RateSource, WeekendMultipliers } from "@/types/models";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
+import { roundMoney } from "@/lib/calc/round";
 
 /**
  * Раздел 6.1 ТЗ. amount_override побеждает всё остальное; иначе расчёт зависит
  * от pay_mode типа дня. Для hourly с rate_is_manual=false ставка выводится из
  * base_rate периода × multiplier и записывается обратно в rate_per_hour —
  * именно так по разделу 5.4 запись остаётся пересчитываемой при смене ставки.
+ * Округление живёт здесь, а не на слое отображения: в Dexie должны лежать
+ * чистые значения, иначе поле «Сумма за день» показывает сырой float.
  */
 export function calculateEntryAmount(
   entry: Pick<Entry, "amount_override" | "hours" | "multiplier" | "rate_per_hour" | "rate_is_manual">,
@@ -13,7 +16,7 @@ export function calculateEntryAmount(
   period: Pick<Period, "base_rate">,
 ): { amount: number; rate_per_hour: number } {
   if (entry.amount_override !== null && entry.amount_override !== undefined) {
-    return { amount: entry.amount_override, rate_per_hour: entry.rate_per_hour };
+    return { amount: roundMoney(entry.amount_override), rate_per_hour: entry.rate_per_hour };
   }
 
   if (dayType.pay_mode === "unpaid") {
@@ -21,11 +24,15 @@ export function calculateEntryAmount(
   }
 
   if (dayType.pay_mode === "fixed_amount") {
-    return { amount: dayType.fixed_amount ?? 0, rate_per_hour: entry.rate_per_hour };
+    return { amount: roundMoney(dayType.fixed_amount ?? 0), rate_per_hour: entry.rate_per_hour };
   }
 
-  const rate_per_hour = entry.rate_is_manual ? entry.rate_per_hour : period.base_rate * entry.multiplier;
-  return { amount: entry.hours * rate_per_hour, rate_per_hour };
+  // Порядок важен: сначала округляем ставку, потом умножаем на часы — иначе
+  // 8 × 49.949999… снова даёт хвост.
+  const rate_per_hour = entry.rate_is_manual
+    ? roundMoney(entry.rate_per_hour)
+    : roundMoney(period.base_rate * entry.multiplier);
+  return { amount: roundMoney(entry.hours * rate_per_hour), rate_per_hour };
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { DayType, Entry, Period, PeriodNaming } from "@/types/models";
+import { roundHours, roundMoney } from "@/lib/calc/round";
 
 export interface PeriodTotals {
   amount: number;
@@ -36,11 +37,13 @@ export function calculatePeriodTotals(
     if (dayType?.counts_toward_norm) norm_hours_covered += entry.hours;
   }
 
+  // Округляем на выходе, а не в цикле: сумма уже округлённых значений всё
+  // равно дрейфует, а копить надо сырые числа.
   return {
-    amount,
-    total_hours,
-    norm_hours_covered,
-    remaining_to_norm: period.norm_hours - norm_hours_covered,
+    amount: roundMoney(amount),
+    total_hours: roundHours(total_hours),
+    norm_hours_covered: roundHours(norm_hours_covered),
+    remaining_to_norm: roundHours(period.norm_hours - norm_hours_covered),
   };
 }
 

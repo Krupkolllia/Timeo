@@ -153,6 +153,23 @@ describe("calculatePeriodTotals", () => {
     expect(totals.remaining_to_norm).toBe(144);
   });
 
+  it("rounds the accumulated total instead of leaking a float tail", () => {
+    // 0.1 + 0.1 + 0.1 = 0.30000000000000004 без округления на выходе.
+    const dayTypeById = new Map([["work", workDayType]]);
+    const entries = [
+      makeEntry({ day_type_id: "work", amount: 0.1, hours: 0.1 }),
+      makeEntry({ day_type_id: "work", amount: 0.1, hours: 0.1 }),
+      makeEntry({ day_type_id: "work", amount: 0.1, hours: 0.1 }),
+    ];
+
+    const totals = calculatePeriodTotals({ extra_amount: 0, norm_hours: 160 }, entries, dayTypeById);
+
+    expect(totals.amount).toBe(0.3);
+    expect(totals.total_hours).toBe(0.3);
+    expect(totals.norm_hours_covered).toBe(0.3);
+    expect(totals.remaining_to_norm).toBe(159.7);
+  });
+
   it("returns zero totals with no entries, remaining_to_norm equal to norm_hours", () => {
     const totals = calculatePeriodTotals({ extra_amount: 0, norm_hours: 160 }, [], new Map());
 
