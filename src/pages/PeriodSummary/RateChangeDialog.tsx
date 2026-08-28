@@ -11,20 +11,28 @@ interface RateChangeDialogProps {
   periodStartISO: string;
   periodEndISO: string;
   todayISO: string;
+  /** Подпись следующего периода — режим «со следующего» обязан назвать, куда именно уйдёт ставка. */
+  nextPeriodLabel: string;
+  /** Следующий период уже создан: настройка его не перепишет, об этом надо сказать прямо. */
+  nextPeriodExists: boolean;
   onCancel: () => void;
   onApply: (mode: RateChangeMode, fromDateISO: string | null) => void;
 }
 
 const MODES: RateChangeMode[] = ["recalculate_period", "apply_from_date", "apply_next_period"];
 
-function modeLabel(mode: RateChangeMode): { title: string; hint: string } {
+function modeLabel(mode: RateChangeMode, nextPeriodLabel: string, nextPeriodExists: boolean) {
   switch (mode) {
     case "recalculate_period":
-      return { title: ru.period.modeRecalculate, hint: ru.period.modeRecalculateHint };
+      return { title: ru.period.modeRecalculate, hint: ru.period.modeRecalculateHint, warning: null };
     case "apply_from_date":
-      return { title: ru.period.modeFromDate, hint: ru.period.modeFromDateHint };
+      return { title: ru.period.modeFromDate, hint: ru.period.modeFromDateHint, warning: null };
     case "apply_next_period":
-      return { title: ru.period.modeNextPeriod, hint: ru.period.modeNextPeriodHint };
+      return {
+        title: ru.period.modeNextPeriod,
+        hint: `${ru.period.modeNextPeriodHint} ${nextPeriodLabel}`,
+        warning: nextPeriodExists ? ru.period.modeNextPeriodHintExists : null,
+      };
   }
 }
 
@@ -42,6 +50,8 @@ export function RateChangeDialog({
   periodStartISO,
   periodEndISO,
   todayISO,
+  nextPeriodLabel,
+  nextPeriodExists,
   onCancel,
   onApply,
 }: RateChangeDialogProps) {
@@ -67,7 +77,7 @@ export function RateChangeDialog({
         </p>
 
         {MODES.map((item) => {
-          const { title, hint } = modeLabel(item);
+          const { title, hint, warning } = modeLabel(item, nextPeriodLabel, nextPeriodExists);
           const selected = mode === item;
           return (
             <button
@@ -78,6 +88,9 @@ export function RateChangeDialog({
             >
               <span className="block text-sm font-medium">{title}</span>
               <span className="mt-0.5 block text-xs text-white/40">{hint}</span>
+              {/* Предупреждение серым и без запрета — раздел 9: режим остаётся
+                  выбираемым, просто честно сказано, что он сделает. */}
+              {warning && <span className="mt-1 block text-xs text-white/60">{warning}</span>}
             </button>
           );
         })}

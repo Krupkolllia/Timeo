@@ -83,4 +83,50 @@ describe("TimeoDB schema migration", () => {
 
     upgraded.close();
   });
+
+  it("fills in default_base_rate_from_period on settings rows written before v4", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores({
+      settings: "id, user_id",
+      periods: "id, user_id, [year+month]",
+      day_types: "id, user_id, sort_order",
+      entries: "id, user_id, date, day_type_id",
+      holidays: "id, user_id, date",
+    });
+    await legacy.open();
+    await legacy.table("settings").add({
+      id: "s1",
+      user_id: "user-1",
+      created_at: "",
+      updated_at: "2026-08-01T00:00:00.000Z",
+      deleted_at: null,
+      currency: "PLN",
+      period_start_day: 1,
+      period_naming: "end_month",
+      default_hours: 8,
+      theme: "system",
+      show_shift_times: false,
+      reminder_enabled: false,
+      reminder_time: null,
+      week_starts_on: "monday",
+      weekend_multipliers: { saturday: 1, sunday: 1, holiday: 1 },
+      default_base_rate: 30,
+      default_norm_hours: 160,
+      preferred_rate_change_mode: null,
+    });
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const settings = await upgraded.settings.get("s1");
+    expect(settings?.default_base_rate_from_period).toBeNull();
+    // Ставка и всё остальное не тронуты — миграция только дописывает поле.
+    expect(settings?.default_base_rate).toBe(30);
+    expect(settings?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
 });

@@ -160,7 +160,7 @@ export function DayScreen({
   // createEntry() резолвится и useLiveQuery увидит новую запись — оба вызова
   // видят entry === undefined и оба создают строку, задваивая запись за день.
   const entryIdRef = useRef<string | null>(entry?.id ?? null);
-  const creatingRef = useRef<Promise<Entry> | null>(null);
+  const creatingRef = useRef<Promise<Entry | null> | null>(null);
   useEffect(() => {
     entryIdRef.current = entry?.id ?? null;
   }, [entry?.id]);
@@ -230,6 +230,7 @@ export function DayScreen({
       // Создание уже в полёте (предыдущий вызов persist ещё не резолвился) —
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
+      if (!created) return;
       entryIdRef.current = created.id;
       draftEntryIdRef.current = created.id;
       await updateEntry(db, created.id, next);
@@ -239,9 +240,13 @@ export function DayScreen({
     const promise = createEntry(db, { ...next, user_id: userId, date });
     creatingRef.current = promise;
     const created = await promise;
+    creatingRef.current = null;
+    // null — период закрыли, пока запись создавалась, и слой данных отказал
+    // (инвариант 2). Возвращать черновик не нужно: useLiveQuery уже везёт
+    // закрытый период, и шторка через кадр перерисуется в режим чтения.
+    if (!created) return;
     entryIdRef.current = created.id;
     draftEntryIdRef.current = created.id;
-    creatingRef.current = null;
     // Только что созданная запись становится выбранной: иначе на дне с
     // несколькими записями экран продолжил бы показывать первую.
     setSelectedEntryId(created.id);

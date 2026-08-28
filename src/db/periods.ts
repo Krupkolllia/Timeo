@@ -1,4 +1,4 @@
-import { calculatePeriodTotals, getPeriodDateRange } from "@/lib/calc/period";
+import { calculatePeriodTotals, getAdjacentPeriod, getPeriodDateRange, periodForDate } from "@/lib/calc/period";
 import { planRateChange } from "@/lib/calc/rateChange";
 import { toISODate } from "@/lib/calc/calendarGrid";
 import { roundMoney } from "@/lib/calc/round";
@@ -44,6 +44,39 @@ async function findPreviousExistingPeriod(
 }
 
 /**
+ * Раздел 6.6 — режим «применить со следующего периода». Обычное правило
+ * раздела 5.2 (копировать ставку у предыдущего периода) отдало бы новому
+ * периоду старую ставку, и решение «с сентября я получаю 60» потерялось бы
+ * молча: default_base_rate по разделу 5.2 читается, только когда предыдущего
+ * периода нет вовсе.
+ *
+ * Поэтому default_base_rate перебивает копирование ровно в одном случае: сам
+ * создаваемый период не раньше отмеченного, а тот период, у которого мы
+ * собираемся копировать, — раньше. Второе условие и есть точка остановки:
+ * как только сентябрь создан, октябрь копирует уже у него, и дальнейшая
+ * правка сентябрьской ставки на его собственном экране не перезаписывается
+ * настройкой задним числом.
+ *
+ * Периоды раньше отмеченного (пользователь ушёл в прошлое) правило не
+ * затрагивает — иначе «со следующего периода» переписывало бы историю.
+ */
+function resolveNewPeriodBaseRate(
+  year: number,
+  month: number,
+  previous: Period | undefined,
+  settings: Pick<Settings, "default_base_rate" | "default_base_rate_from_period">,
+): number {
+  const from = settings.default_base_rate_from_period;
+  if (from) {
+    const fromOrdinal = periodOrdinal(from.year, from.month);
+    const targetReached = periodOrdinal(year, month) >= fromOrdinal;
+    const previousPredatesDecision = !previous || periodOrdinal(previous.year, previous.month) < fromOrdinal;
+    if (targetReached && previousPredatesDecision) return settings.default_base_rate;
+  }
+  return previous ? previous.base_rate : settings.default_base_rate;
+}
+
+/**
  * Section 5.2 of the spec — the period isolation mechanism. On first access to a period,
  * the base_rate/norm_hours values are COPIED from the previous period (not referenced),
  * so edits in one period physically cannot affect another. If there is no
@@ -57,7 +90,7 @@ export async function getOrCreatePeriod(
   userId: string,
   year: number,
   month: number,
-  settings: Pick<Settings, "default_base_rate" | "default_norm_hours">,
+  settings: Pick<Settings, "default_base_rate" | "default_norm_hours" | "default_base_rate_from_period">,
 ): Promise<Period> {
   // Read and create in a single rw transaction: without this, two parallel calls
   // (e.g. a repeated effect invocation in React StrictMode) would both fail to find
@@ -69,6 +102,7 @@ export async function getOrCreatePeriod(
     const previous = await findPreviousExistingPeriod(db, userId, year, month);
 
     const now = new Date().toISOString();
+    const base_rate = resolveNewPeriodBaseRate(year, month, previous, settings);
     const period: Period = {
       id: crypto.randomUUID(),
       user_id: userId,
@@ -77,7 +111,7 @@ export async function getOrCreatePeriod(
       deleted_at: null,
       year,
       month,
-      base_rate: previous ? previous.base_rate : settings.default_base_rate,
+      base_rate,
       norm_hours: previous ? previous.norm_hours : settings.default_norm_hours,
       extra_amount: 0,
       extra_note: "",
@@ -172,19 +206,19 @@ export async function applyBaseRateChange(
         preferred_rate_change_mode: params.mode,
         updated_at: now,
       };
-      // «Со следующего периода»: текущий период не трогаем вовсе, новое
-      // значение уходит в settings.default_base_rate — ровно так, как описан
-      // режим в разделе 6.6.
+      // «Со следующего периода»: ни одна запись текущего периода не трогается,
+      // новое значение уходит в settings.default_base_rate вместе с отметкой,
+      // с какого периода оно действует. Без отметки режим был бы пустышкой —
+      // см. resolveNewPeriodBaseRate.
       //
-      // ВНИМАНИЕ, открытый вопрос к заказчику. Раздел 6.6 обещает, что значение
-      // «подхватится при создании следующего периода», но по разделу 5.2 новый
-      // период копируется из предыдущего, а default_base_rate участвует только
-      // когда предыдущего периода нет вообще. То есть после первого же месяца
-      // этот режим фактически ни на что не влияет. Противоречие в ТЗ, а не в
-      // коде: чинится либо флагом «ожидающая ставка» в модели, либо правкой
-      // правила копирования — и то и другое меняет согласованное поведение,
-      // поэтому здесь реализовано буквально по разделу 6.6.
-      if (params.mode === "apply_next_period") settingsPatch.default_base_rate = newBaseRate;
+      // Уже существующий следующий период при этом не переписывается: его
+      // записи пересчитаны не будут, и period.base_rate разошёлся бы с суммами
+      // в собственных строках месяца. Такой период правится на своём экране,
+      // и диалог об этом прямо предупреждает.
+      if (params.mode === "apply_next_period") {
+        settingsPatch.default_base_rate = newBaseRate;
+        settingsPatch.default_base_rate_from_period = getAdjacentPeriod(params.year, params.month, 1);
+      }
       await db.settings.update(settingsRow.id, settingsPatch);
     }
 
@@ -261,6 +295,27 @@ export async function reopenPeriod(db: TimeoDB, userId: string, year: number, mo
     if (!period || !period.is_closed) return;
     await db.periods.update(period.id, { is_closed: false, updated_at: new Date().toISOString() });
   });
+}
+
+/**
+ * Закрыт ли период, которому принадлежит дата (инвариант 2). Вызывается из
+ * слоя записей перед каждой правкой, поэтому построен на точечных чтениях по
+ * индексам, без выборок.
+ *
+ * Отсутствие строки настроек или строки периода трактуется как «открыт»: если
+ * периода в базе нет, его никто не закрывал, и запрещать нечего.
+ */
+export async function isDateInClosedPeriod(db: TimeoDB, userId: string, dateISO: string): Promise<boolean> {
+  const settings = await db.settings.where("user_id").equals(userId).first();
+  if (!settings) return false;
+
+  // Дату разбираем вручную: new Date("2026-08-10") — это UTC-полночь, и на
+  // положительном смещении она превращается в 10 августа местного времени
+  // только случайно (инвариант 27).
+  const [year, month, day] = dateISO.split("-").map(Number);
+  const id = periodForDate(new Date(year, month - 1, day), settings.period_start_day);
+  const period = await findPeriod(db, userId, id.year, id.month);
+  return period?.is_closed === true;
 }
 
 /**

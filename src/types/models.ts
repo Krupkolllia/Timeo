@@ -15,6 +15,12 @@ export interface WeekendMultipliers {
   holiday: number;
 }
 
+/** Ссылка на период по его устойчивому идентификатору (раздел 5.2). */
+export interface PeriodRef {
+  year: number;
+  month: number;
+}
+
 export interface Settings extends BaseRecord {
   currency: string;
   period_start_day: number;
@@ -28,6 +34,14 @@ export interface Settings extends BaseRecord {
   weekend_multipliers: WeekendMultipliers;
   default_base_rate: number;
   default_norm_hours: number;
+  /**
+   * С какого периода default_base_rate начинает действовать. Заполняется
+   * режимом «применить со следующего периода» (раздел 6.6): без этой отметки
+   * значение не может «подхватиться при создании следующего периода», потому
+   * что по разделу 5.2 новый период копирует ставку у предыдущего и до
+   * default_base_rate дело не доходит вовсе.
+   */
+  default_base_rate_from_period: PeriodRef | null;
   preferred_rate_change_mode: RateChangeMode | null;
 }
 

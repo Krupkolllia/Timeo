@@ -23,7 +23,7 @@ function openDb(): TimeoDB {
   return db;
 }
 
-const settings = { default_base_rate: 25, default_norm_hours: 168 };
+const settings = { default_base_rate: 25, default_norm_hours: 168, default_base_rate_from_period: null };
 
 describe("getOrCreatePeriod", () => {
   it("creates a period from settings defaults when there is no previous period", async () => {
@@ -139,6 +139,7 @@ async function seedSettings(database: TimeoDB): Promise<Settings> {
     weekend_multipliers: { saturday: 1, sunday: 1, holiday: 1 },
     default_base_rate: 25,
     default_norm_hours: 168,
+    default_base_rate_from_period: null,
     preferred_rate_change_mode: null,
   };
   await database.settings.add(row);
@@ -203,6 +204,70 @@ describe("getOrCreatePeriod — пропуски в цепочке период�
 
     const months = (await database.periods.where("user_id").equals(USER).toArray()).map((p) => p.month).sort((a, b) => a - b);
     expect(months).toEqual([8, 10]);
+  });
+
+  it("берёт default_base_rate, отмеченный режимом «со следующего периода»", async () => {
+    const database = openDb();
+    const august = await getOrCreatePeriod(database, USER, 2026, 8, settings);
+    await database.periods.update(august.id, { base_rate: 50 });
+    const withPending = {
+      default_base_rate: 60,
+      default_norm_hours: 168,
+      default_base_rate_from_period: { year: 2026, month: 9 },
+    };
+
+    const september = await getOrCreatePeriod(database, USER, 2026, 9, withPending);
+
+    expect(september.base_rate).toBe(60);
+    // Норма часов режимом не затрагивается — она по-прежнему копируется.
+    expect(september.norm_hours).toBe(august.norm_hours);
+  });
+
+  it("отмеченная ставка действует и после пропущенных месяцев", async () => {
+    const database = openDb();
+    const august = await getOrCreatePeriod(database, USER, 2026, 8, settings);
+    await database.periods.update(august.id, { base_rate: 50 });
+    const withPending = {
+      default_base_rate: 60,
+      default_norm_hours: 168,
+      default_base_rate_from_period: { year: 2026, month: 9 },
+    };
+
+    const december = await getOrCreatePeriod(database, USER, 2026, 12, withPending);
+
+    expect(december.base_rate).toBe(60);
+  });
+
+  it("после создания отмеченного периода дальнейшие копируют уже у него", async () => {
+    const database = openDb();
+    await getOrCreatePeriod(database, USER, 2026, 8, settings);
+    const withPending = {
+      default_base_rate: 60,
+      default_norm_hours: 168,
+      default_base_rate_from_period: { year: 2026, month: 9 },
+    };
+    const september = await getOrCreatePeriod(database, USER, 2026, 9, withPending);
+    // Пользователь передумал и поправил сентябрь на его собственном экране.
+    await database.periods.update(september.id, { base_rate: 70 });
+
+    const october = await getOrCreatePeriod(database, USER, 2026, 10, withPending);
+
+    expect(october.base_rate).toBe(70);
+  });
+
+  it("отметка не переписывает периоды раньше неё", async () => {
+    const database = openDb();
+    const may = await getOrCreatePeriod(database, USER, 2026, 5, settings);
+    await database.periods.update(may.id, { base_rate: 50 });
+    const withPending = {
+      default_base_rate: 60,
+      default_norm_hours: 168,
+      default_base_rate_from_period: { year: 2026, month: 9 },
+    };
+
+    const june = await getOrCreatePeriod(database, USER, 2026, 6, withPending);
+
+    expect(june.base_rate).toBe(50);
   });
 
   it("не берёт более поздний период за образец", async () => {
@@ -341,6 +406,33 @@ describe("applyBaseRateChange", () => {
     expect(period?.base_rate).toBe(25);
     expect((await database.entries.get("mar"))?.amount).toBe(240);
     expect((await database.settings.get("settings-1"))?.default_base_rate).toBe(40);
+    expect((await database.settings.get("settings-1"))?.default_base_rate_from_period).toEqual({
+      year: 2026,
+      month: 4,
+    });
+  });
+
+  it("«со следующего периода» доходит до реально созданного следующего периода", async () => {
+    const database = openDb();
+    await seedDayTypes(database);
+    const settingsRow = await seedSettings(database);
+    const march = await getOrCreatePeriod(database, USER, 2026, 3, settingsRow);
+    await database.periods.update(march.id, { base_rate: 50 });
+
+    await applyBaseRateChange(database, USER, {
+      year: 2026,
+      month: 3,
+      newBaseRate: 60,
+      mode: "apply_next_period",
+      fromDateISO: null,
+      periodStartDay: 1,
+    });
+
+    const updatedSettings = await database.settings.get("settings-1");
+    const april = await getOrCreatePeriod(database, USER, 2026, 4, updatedSettings!);
+    expect(april.base_rate).toBe(60);
+    // Март при этом не сдвинулся ни на грош.
+    expect((await database.periods.get(march.id))?.base_rate).toBe(50);
   });
 
   it("запоминает выбранный режим в настройках", async () => {

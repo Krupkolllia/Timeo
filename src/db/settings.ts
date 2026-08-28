@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
   weekend_multipliers: { saturday: 1, sunday: 1, holiday: 1 },
   default_base_rate: 0,
   default_norm_hours: 160,
+  default_base_rate_from_period: null,
   preferred_rate_change_mode: null,
 };
 

@@ -1,6 +1,6 @@
 # Timeo
 
-Source of truth for product and architecture — [TIMEO-SPEC.md](TIMEO-SPEC.md). All decisions there
+Source of truth for product and architecture — [SPEC.md](SPEC.md). All decisions there
 are agreed with the customer and must not be reinvented without an explicit instruction. Read it
 before any work on functionality.
 

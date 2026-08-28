@@ -8,6 +8,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { RateChangeDialog } from "@/pages/PeriodSummary/RateChangeDialog";
 import {
   calculatePeriodTotals,
+  getAdjacentPeriod,
   getPeriodDateRange,
   getPeriodLabel,
   periodForDate,
@@ -96,6 +97,17 @@ export function PeriodSummaryPage() {
     return rows.sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at));
   }, [range]);
 
+  // Следующий период — только чтобы диалог смены ставки мог назвать его и
+  // сказать, создан ли он уже. getOrCreatePeriod здесь не вызывается: он создаёт
+  // строку при первом обращении (раздел 5.2), и открытие диалога начало бы
+  // плодить пустые периоды вперёд по времени.
+  const next = useMemo(() => (viewed ? getAdjacentPeriod(viewed.year, viewed.month, 1) : null), [viewed]);
+  const nextPeriod = useLiveQuery(
+    () =>
+      next ? db.periods.where("[user_id+year+month]").equals([userId, next.year, next.month]).first() : undefined,
+    [next],
+  );
+
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
 
   const totals = useMemo(
@@ -175,6 +187,10 @@ export function PeriodSummaryPage() {
   }
 
   const label = getPeriodLabel(viewed.year, viewed.month, settings.period_start_day, settings.period_naming);
+  const nextLabelId = next
+    ? getPeriodLabel(next.year, next.month, settings.period_start_day, settings.period_naming)
+    : label;
+  const nextLabel = `${ru.calendar.monthNames[nextLabelId.month - 1]} ${nextLabelId.year}`;
   const isClosed = period.is_closed;
   const rateValue = rateDraft ?? period.base_rate;
   const rateChanged = rateValue !== period.base_rate;
@@ -358,6 +374,8 @@ export function PeriodSummaryPage() {
           periodStartISO={toISODate(range.start)}
           periodEndISO={toISODate(range.end)}
           todayISO={toISODate(new Date())}
+          nextPeriodLabel={nextLabel}
+          nextPeriodExists={nextPeriod !== undefined}
           onCancel={() => setRateDialogOpen(false)}
           onApply={(mode, fromDateISO) => void handleApplyRate(mode, fromDateISO)}
         />
