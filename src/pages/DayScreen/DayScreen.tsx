@@ -571,7 +571,13 @@ export function DayScreen({
           полоски 56×24, а кнопки получали нулевую высоту. Самый нужный
           элемент экрана оказывался невидимым ровно тогда, когда полей в
           шторке много. */}
-      <div className="-mx-4 flex shrink-0 gap-3 overflow-x-auto px-4 pb-1">
+      {/* pt-1 с компенсацией -mt-1: overflow-x-auto обрезает и по вертикали
+          тоже (по спецификации visible на второй оси превращается в auto), а
+          кольцо выбранного типа ring-2 рисуется на 2px ЗА границей кружка.
+          Снизу запас давал pb-1, сверху не давал никто — у выбранного кружка
+          срезало верхушку. Отрицательный margin возвращает ряд на прежнее
+          место, чтобы отступы шторки не поехали. */}
+      <div className="-mx-4 -mt-1 flex shrink-0 gap-3 overflow-x-auto px-4 pt-1 pb-1">
         {activeDayTypes.length === 0 && <p className="text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
           const isSelected = draft?.day_type_id === dt.id;
