@@ -327,16 +327,25 @@ describe("CalendarPage — отмена удаления (раздел 9)", () =
     fireEvent.click(dayCell("2026-08-10"));
     fireEvent.click(await screen.findByRole("button", { name: ru.day.deleteEntry }));
     await screen.findByText(ru.day.deletedNotice);
+    const afterFirstDelete = vi.getTimerCount();
 
-    await vi.advanceTimersByTimeAsync(3000);
     fireEvent.click(dayCell("2026-08-11"));
     fireEvent.click(await screen.findByRole("button", { name: ru.day.deleteEntry }));
-    await screen.findByText(ru.day.deletedNotice);
+    // Ждём завершения именно ВТОРОГО удаления: плашка отмены у обоих
+    // одинаковая, и findByText нашёл бы ещё первую — дальше «отменить»
+    // возвращало бы запись прошлого дня. Опустевший день закрывает шторку, и
+    // это единственный признак в разметке, привязанный ко второму удалению.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: ru.day.deleteEntry })).not.toBeInTheDocument(),
+    );
 
-    // Таймер первой плашки сброшен: через 3 секунды после второго удаления
-    // окно отмены обязано быть ещё открыто.
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(screen.getByText(ru.day.deletedNotice)).toBeInTheDocument();
+    // Таймер первой плашки сброшен, а не идёт вторым: считаем сами таймеры, а
+    // не смотрим на часы. Прежняя проверка промотала время и ждала, что плашка
+    // ещё на экране, — но с shouldAdvanceTime реальное время тоже идёт в зачёт
+    // таймеру, и под нагрузкой (полный прогон, CI) секунды между кликами
+    // съедали окно отмены целиком. Тест падал на ровном месте примерно раз на
+    // десять прогонов и на main тоже.
+    expect(vi.getTimerCount()).toBe(afterFirstDelete);
 
     fireEvent.click(screen.getByRole("button", { name: ru.day.undo }));
     await waitFor(async () => expect((await db.entries.get("e-2"))?.deleted_at).toBeNull());
@@ -580,5 +589,28 @@ describe("CalendarPage — праздники (раздел 8.1)", () => {
         `/settings/holidays?add=2026-08-10&return=${encodeURIComponent("/?day=2026-08-10")}`,
       ),
     );
+  });
+});
+
+describe("CalendarPage — ручной исторический период (раздел 8.7)", () => {
+  it("нижняя панель показывает вписанные итоги, а не сумму записей (инвариант 5)", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(
+      makePeriod({
+        year: 2026,
+        month: 8,
+        is_manual: true,
+        is_closed: true,
+        closed_totals: { amount: 1500.5, total_hours: 100, norm_hours_covered: 100 },
+      }),
+    );
+    await db.entries.add(makeEntry({ id: "e-stray", date: "2026-08-11", amount: 240, hours: 8 }));
+
+    renderCalendar();
+    await ready();
+
+    expect(await screen.findByText("1500.50 PLN")).toBeInTheDocument();
+    expect(await screen.findByText("100 ч")).toBeInTheDocument();
   });
 });

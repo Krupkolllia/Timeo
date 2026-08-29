@@ -5,8 +5,24 @@ import { roundMoney } from "@/lib/calc/round";
 import type { TimeoDB } from "@/db/schema";
 import type { Entry, Period, RateChangeMode, Settings } from "@/types/models";
 
+/**
+ * Период месяца, кроме мягко удалённых (инвариант 38: удалённые строки
+ * исключены из каждого запроса). Удалить период можно ровно одним способом —
+ * убрав исторический месяц на экране прошлых периодов (раздел 8.7), — и без
+ * этого фильтра удалённый месяц продолжал бы показываться и находиться.
+ *
+ * Экраны читают периоды тем же запросом (findLivePeriodQuery), чтобы правило
+ * жило в одном месте.
+ */
+export function findLivePeriodQuery(db: TimeoDB, userId: string, year: number, month: number) {
+  return db.periods
+    .where("[user_id+year+month]")
+    .equals([userId, year, month])
+    .filter((period) => period.deleted_at === null);
+}
+
 function findPeriod(db: TimeoDB, userId: string, year: number, month: number) {
-  return db.periods.where("[user_id+year+month]").equals([userId, year, month]).first();
+  return findLivePeriodQuery(db, userId, year, month).first();
 }
 
 function periodOrdinal(year: number, month: number): number {
@@ -19,6 +35,13 @@ function periodOrdinal(year: number, month: number): number {
  * период, а не буквально месяц минус один. Иначе прыжок с августа на октябрь
  * не находил сентябрь, откатывался на settings.default_base_rate (по умолчанию
  * 0) и молча создавал октябрь с нулевой ставкой.
+ *
+ * Ручные периоды (раздел 8.7) источником копирования не являются. У такого
+ * периода нет записей и никто никогда не вводил его базовую ставку — человек
+ * вписал итог за месяц, а не час. Скопировать её значило бы завести следующий
+ * месяц по ставке, которой не существовало: записав май 2026 как исторический,
+ * пользователь получал июнь с base_rate = 0 при default_base_rate = 30, и
+ * каждый июньский день молча считался по нулю.
  */
 async function findPreviousExistingPeriod(
   db: TimeoDB,
@@ -34,7 +57,7 @@ async function findPreviousExistingPeriod(
   let best: Period | undefined;
   let bestOrdinal = -Infinity;
   for (const candidate of all) {
-    if (candidate.deleted_at !== null) continue;
+    if (candidate.deleted_at !== null || candidate.is_manual) continue;
     const ordinal = periodOrdinal(candidate.year, candidate.month);
     if (ordinal >= target || ordinal <= bestOrdinal) continue;
     best = candidate;
