@@ -599,7 +599,8 @@ Rules that must hold under every possible sequence of actions. Each one deserves
 54. Nothing is blocked. Every warning is passive and dismissible.
 55. Every computed number can be traced to its inputs on the breakdown screen.
 56. Every destructive action offers an undo affordance for several seconds. There are no confirmation
-    modals except for reopening a closed period and for replacing data on import.
+    modals except for reopening a closed period, for replacing data on import, and for leaving the day
+    sheet with unsaved changes (8.2, agreed with the client after block 6).
 57. Values on the day screen that differ from the day type's defaults are marked, so the user can see
     what is non-standard without remembering the template.
 58. The app never shows a blank screen. An unhandled error renders a readable panel with the message
@@ -638,6 +639,21 @@ Once a type is chosen:
 - the day's amount, large, recomputed live
 - a toggle for entering the amount by hand
 - a note
+
+**Deviation, agreed with the client after block 6.** The entry reaches the database only when the
+**Save** button is pressed, not on every field change. Two consequences follow, both accepted
+deliberately:
+
+- Choosing a day type no longer creates a row. Until Save is pressed the day holds a draft that exists
+  only on screen, and Delete appears only once a row exists.
+- Closing the sheet, starting another entry for the day, or switching between the day's entries with
+  unsaved changes asks first: **Save changes** or **Do not save**. A tap outside the dialog keeps the
+  user in the day and keeps what they typed — a stray tap must not cost a shift.
+
+This is the **third** confirmation dialog in the app where invariant 56 allowed two. The exception is
+recorded rather than silently taken: the button introduces the only way to lose typed input that
+exists anywhere in this app, and on a phone tested through screenshots a silent loss surfaces weeks
+later, if at all.
 
 ### 8.3 Period summary
 

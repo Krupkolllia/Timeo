@@ -441,6 +441,8 @@ describe("CalendarPage — ?day= в чужом периоде (инвариан�
     await ready();
 
     fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+    // Раздел 8.2: запись уходит в базу только по кнопке.
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
 
     await waitFor(async () => {
       const rows = await db.entries.toArray();

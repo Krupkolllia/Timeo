@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { db } from "@/db/db";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
 import { ru } from "@/i18n/ru";
@@ -78,7 +78,23 @@ async function storedEntries(): Promise<Entry[]> {
     .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
 }
 
-/** Ждёт, пока в базе окажется ровно одна запись, и отдаёт её. */
+/**
+ * Нажимает «Сохранить» и дожидается, пока экран скажет, что сохранять больше
+ * нечего. Раздел 8.2: запись уходит в базу только по кнопке, поэтому каждая
+ * проверка сохранённой строки начинается отсюда.
+ *
+ * Сначала ждём ЭКРАН, и только потом читаем Dexie: обратный порядок в этом
+ * репозитории уже дважды давал падения, которые видно лишь под нагрузкой.
+ * Внутрь waitFor эту функцию звать нельзя — она сама ждёт.
+ */
+async function save() {
+  const button = screen.queryByRole("button", { name: ru.day.save });
+  if (!button) return;
+  fireEvent.click(button);
+  await waitFor(() => expect(screen.queryByRole("button", { name: ru.day.save })).not.toBeInTheDocument());
+}
+
+/** Ждёт, пока в базе окажется ровно одна запись, и отдаёт её. Ничего не сохраняет. */
 async function onlyEntry(): Promise<Entry> {
   let row: Entry | undefined;
   await waitFor(async () => {
@@ -87,6 +103,12 @@ async function onlyEntry(): Promise<Entry> {
     row = rows[0];
   });
   return row!;
+}
+
+/** Сохранить и прочитать единственную запись — самая частая пара. */
+async function savedEntry(): Promise<Entry> {
+  await save();
+  return onlyEntry();
 }
 
 beforeEach(async () => {
@@ -98,7 +120,7 @@ describe("DayScreen — создание записи", () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
 
-    const entry = await onlyEntry();
+    const entry = await savedEntry();
     expect(entry).toMatchObject({
       day_type_id: "dt-night",
       hours: 8,
@@ -118,7 +140,7 @@ describe("DayScreen — создание записи", () => {
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
 
-    const entry = await onlyEntry();
+    const entry = await savedEntry();
     expect(entry.day_type_id).toBe("dt-night");
     expect(entry.amount).toBe(360);
   });
@@ -139,16 +161,16 @@ describe("DayScreen — часы, множитель и ставка", () => {
   it("шаг ±0.5 пересчитывает сумму и не уходит ниже нуля", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     fireEvent.click(screen.getByRole("button", { name: "+" }));
-    await waitFor(async () => expect((await onlyEntry()).hours).toBe(8.5));
-    expect((await onlyEntry()).amount).toBe(255);
+    expect((await savedEntry()).hours).toBe(8.5);
+    expect((await savedEntry()).amount).toBe(255);
 
     const minus = screen.getByRole("button", { name: "−" });
     for (let i = 0; i < 20; i++) fireEvent.click(minus);
-    await waitFor(async () => expect((await onlyEntry()).hours).toBe(0));
-    expect((await onlyEntry()).amount).toBe(0);
+    expect((await savedEntry()).hours).toBe(0);
+    expect((await savedEntry()).amount).toBe(0);
   });
 
   it("правка множителя не трогает ставку", async () => {
@@ -156,15 +178,15 @@ describe("DayScreen — часы, множитель и ставка", () => {
     // ставку при правке множителя (коммит dbccfb8).
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().rate, "50");
-    await waitFor(async () => expect((await onlyEntry()).rate_is_manual).toBe(true));
+    expect((await savedEntry()).rate_is_manual).toBe(true);
 
     type(fields().multiplier, "2");
-    await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(2));
+    expect((await savedEntry()).multiplier).toBe(2);
 
-    const entry = await onlyEntry();
+    const entry = await savedEntry();
     expect(entry.rate_per_hour).toBe(50);
     expect(entry.rate_is_manual).toBe(true);
     expect(entry.amount).toBe(800);
@@ -173,12 +195,12 @@ describe("DayScreen — часы, множитель и ставка", () => {
   it("правка ставки не выводит множитель и делает ставку ручной", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().rate, "40");
 
-    await waitFor(async () => expect((await onlyEntry()).rate_per_hour).toBe(40));
-    const entry = await onlyEntry();
+    expect((await savedEntry()).rate_per_hour).toBe(40);
+    const entry = await savedEntry();
     expect(entry.multiplier).toBe(1.5);
     expect(entry.rate_is_manual).toBe(true);
     expect(entry.rate_source).toBe("manual");
@@ -190,13 +212,13 @@ describe("DayScreen — часы, множитель и ставка", () => {
     // на нулевой базе всегда ноль.
     renderDay({ period: { base_rate: 0 } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().rate, "50");
-    await waitFor(async () => expect((await onlyEntry()).rate_per_hour).toBe(50));
+    expect((await savedEntry()).rate_per_hour).toBe(50);
     type(fields().multiplier, "2");
 
-    await waitFor(async () => expect((await onlyEntry()).amount).toBe(800));
+    expect((await savedEntry()).amount).toBe(800);
   });
 });
 
@@ -221,7 +243,7 @@ describe("DayScreen — подпись источника множителя", (
     expect(fields().multiplier).toHaveValue("2.5");
 
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(2.5));
+    expect((await savedEntry()).multiplier).toBe(2.5);
   });
 
   it("тип дня со своим множителем подписан как тип дня", async () => {
@@ -235,7 +257,7 @@ describe("DayScreen — подпись источника множителя", (
     renderDay({ date: SUNDAY, settings: { weekend_multipliers: { saturday: 1.5, sunday: 2, holiday: 2.5 } } });
     fireEvent.click(screen.getByRole("button", { name: "Отпуск" }));
 
-    await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(1));
+    expect((await savedEntry()).multiplier).toBe(1);
     expect(screen.getByText("×1")).toBeInTheDocument();
   });
 
@@ -253,13 +275,13 @@ describe("DayScreen — подпись источника множителя", (
     fireEvent.click(screen.getByRole("button", { name: "Оплачиваемый отпуск" }));
 
     expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceDayType}, ×`))).toBeInTheDocument();
-    await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(0.8));
+    expect((await savedEntry()).multiplier).toBe(0.8);
   });
 
   it("значение, заданное руками, подписано как ручное", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().multiplier, "3");
     expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceManual}, ×`))).toBeInTheDocument();
@@ -271,7 +293,7 @@ describe("DayScreen — режимы оплаты", () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Отгул" }));
 
-    await waitFor(async () => expect((await onlyEntry()).amount).toBe(0));
+    expect((await savedEntry()).amount).toBe(0);
     expect(screen.getByText(ru.day.hintUnpaidDayType)).toBeInTheDocument();
     // Раздел 9: поля остаются доступными, а не блокируются.
     expect(fields().rate).not.toBeDisabled();
@@ -281,37 +303,37 @@ describe("DayScreen — режимы оплаты", () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Дежурство" }));
 
-    await waitFor(async () => expect((await onlyEntry()).amount).toBe(150));
+    expect((await savedEntry()).amount).toBe(150);
     expect(screen.getByText(ru.day.payModeFixedAmount)).toBeInTheDocument();
   });
 
   it("ручная сумма перебивает всё и возвращается к расчёту при выключении", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     fireEvent.click(screen.getByRole("switch"));
-    await waitFor(async () => expect((await onlyEntry()).amount_override).toBe(240));
+    expect((await savedEntry()).amount_override).toBe(240);
 
     type(fields().amount, "1000");
-    await waitFor(async () => expect((await onlyEntry()).amount).toBe(1000));
+    expect((await savedEntry()).amount).toBe(1000);
 
     fireEvent.click(screen.getByRole("switch"));
-    await waitFor(async () => expect((await onlyEntry()).amount_override).toBeNull());
-    expect((await onlyEntry()).amount).toBe(240);
+    expect((await savedEntry()).amount_override).toBeNull();
+    expect((await savedEntry()).amount).toBe(240);
   });
 
   it("отрицательная сумма сохраняется с мягким предупреждением", async () => {
     // Инвариант 24: это законный способ записать удержание.
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     fireEvent.click(screen.getByRole("switch"));
-    await waitFor(async () => expect((await onlyEntry()).amount_override).toBe(240));
+    expect((await savedEntry()).amount_override).toBe(240);
     type(fields().amount, "-500");
 
-    await waitFor(async () => expect((await onlyEntry()).amount).toBe(-500));
+    expect((await savedEntry()).amount).toBe(-500);
     expect(screen.getByText(ru.day.hintNegativeAmount)).toBeInTheDocument();
   });
 });
@@ -320,10 +342,10 @@ describe("DayScreen — подсказки", () => {
   it("больше 24 часов сохраняется и предупреждает", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().hours, "26");
-    await waitFor(async () => expect((await onlyEntry()).hours).toBe(26));
+    expect((await savedEntry()).hours).toBe(26);
     expect(screen.getByText(ru.day.hintManyHours).className).not.toContain("invisible");
   });
 
@@ -339,7 +361,7 @@ describe("DayScreen — подсказки", () => {
   it("нулевая ставка, вписанная руками, объясняется отдельной строкой", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().rate, "0");
     await waitFor(() => expect(screen.getByText(ru.day.hintZeroRate).className).not.toContain("invisible"));
@@ -352,24 +374,24 @@ describe("DayScreen — смена типа дня", () => {
   it("нетронутый экран берёт значения нового типа", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
 
-    await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(1.5));
+    expect((await savedEntry()).multiplier).toBe(1.5);
   });
 
   it("уже введённые значения переживают смену типа", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(fields().hours, "10");
-    await waitFor(async () => expect((await onlyEntry()).hours).toBe(10));
+    expect((await savedEntry()).hours).toBe(10);
 
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
-    await waitFor(async () => expect((await onlyEntry()).day_type_id).toBe("dt-night"));
+    expect((await savedEntry()).day_type_id).toBe("dt-night");
 
-    const entry = await onlyEntry();
+    const entry = await savedEntry();
     expect(entry.hours).toBe(10);
     expect(entry.multiplier).toBe(1);
     expect(entry.amount).toBe(300);
@@ -384,12 +406,31 @@ describe("DayScreen — несколько записей на день", () => 
     expect(screen.queryByRole("button", { name: /^1\./ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: ru.day.addEntry }));
+    // Раздел 8.2: пока не нажата кнопка, второй строки в базе нет — и полоски
+    // тоже, показывать в ней нечего.
+    expect(screen.queryByRole("button", { name: /^2\./ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
     expect(await screen.findByRole("button", { name: /^2\./ })).toBeInTheDocument();
   });
 
+  it("сохранение сразу после сохранения правит ту же строку, а не заводит вторую", async () => {
+    // Своя только что созданная запись приезжает из useLiveQuery с задержкой,
+    // и всё это время экран не видит её в entries. Без привязки черновика к
+    // созданному id второе сохранение создавало вторую запись за день.
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    await save();
+
+    type(fields().hours, "6");
+    await save();
+
+    const rows = await storedEntries();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hours).toBe(6);
+  });
+
   it("«добавить запись» не затирает первую запись дня", async () => {
-    // Гонка: после сброса выбранной записи entry снова становится entries[0],
-    // и эффект возвращал её id в entryIdRef, пока createEntry был в полёте.
     await db.entries.bulkAdd([
       makeEntry({ id: "e-1", created_at: "2026-08-01T10:00:00.000Z", hours: 12, amount: 360, note: "первая" }),
       makeEntry({ id: "e-2", created_at: "2026-08-01T11:00:00.000Z", hours: 4, amount: 120, note: "вторая" }),
@@ -398,10 +439,8 @@ describe("DayScreen — несколько записей на день", () => 
 
     fireEvent.click(await screen.findByRole("button", { name: /^2\./ }));
     fireEvent.click(screen.getByRole("button", { name: ru.day.addEntry }));
-    await act(async () => {
-      await Promise.resolve();
-    });
     fireEvent.click(screen.getByRole("button", { name: "Отпуск" }));
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
 
     await waitFor(async () => expect(await storedEntries()).toHaveLength(3));
     const rows = await storedEntries();
@@ -410,22 +449,35 @@ describe("DayScreen — несколько записей на день", () => 
     expect(rows[2].day_type_id).toBe("dt-vacation");
   });
 
-  it("«добавить запись» во время создания строки не присваивает её id новому черновику", async () => {
-    // Первый тап ещё не долетел до Dexie, когда пользователь начинает новую
-    // строку: продолжение первого createEntry относится уже к прошлому
-    // черновику и не должно направлять в неё дальнейшие правки.
+  it("двойное нажатие «Сохранить» не создаёт две строки", async () => {
+    // Пока запись уходила в Dexie, кнопка оставалась на месте: второй тап
+    // успевал вызвать создание ещё раз, и день получал дубль. Тот же замок,
+    // что на экранах праздников и прошлых периодов.
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
-    fireEvent.click(screen.getByRole("button", { name: ru.day.addEntry }));
-    fireEvent.click(screen.getByRole("button", { name: "Отпуск" }));
+    const button = screen.getByRole("button", { name: ru.day.save });
+    fireEvent.click(button);
+    fireEvent.click(button);
 
-    await waitFor(async () => expect((await storedEntries()).length).toBeGreaterThanOrEqual(1));
+    await waitFor(async () => expect(await storedEntries()).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(await storedEntries()).toHaveLength(1);
+  });
 
-    const rows = await storedEntries();
-    // Ночная смена сохранилась ровно такой, какой её выбрали.
-    expect(rows.some((row) => row.day_type_id === "dt-night" && row.amount === 360)).toBe(true);
-    expect(rows.some((row) => row.day_type_id === "dt-vacation")).toBe(true);
+  it("«добавить запись» с несохранёнными правками сначала спрашивает", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 12, amount: 360 }));
+    renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.addEntry }));
+
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    // Новая строка не начата, пока человек не ответил.
+    expect(await db.entries.count()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.unsavedSave }));
+    await waitFor(async () => expect((await db.entries.get("e-1"))?.hours).toBe(6));
   });
 
   it("правка идёт в выбранную запись, а не в первую", async () => {
@@ -438,9 +490,157 @@ describe("DayScreen — несколько записей на день", () => 
     fireEvent.click(await screen.findByRole("button", { name: /^2\./ }));
     await waitFor(() => expect(fields().hours).toHaveValue("4"));
     type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
 
     await waitFor(async () => expect((await db.entries.get("e-2"))?.hours).toBe(6));
     expect((await db.entries.get("e-1"))?.hours).toBe(12);
+  });
+
+  it("переключение на другую запись с несохранёнными правками спрашивает", async () => {
+    await db.entries.bulkAdd([
+      makeEntry({ id: "e-1", created_at: "2026-08-01T10:00:00.000Z", hours: 12, amount: 360 }),
+      makeEntry({ id: "e-2", created_at: "2026-08-01T11:00:00.000Z", hours: 4, amount: 120 }),
+    ]);
+    renderDay();
+
+    await screen.findByRole("button", { name: /^1\./ });
+    type(fields().hours, "9");
+    fireEvent.click(screen.getByRole("button", { name: /^2\./ }));
+
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: ru.day.unsavedDiscard }));
+
+    // Брошенные девять часов не должны уехать во вторую запись.
+    await waitFor(() => expect(fields().hours).toHaveValue("4"));
+    expect((await db.entries.get("e-1"))?.hours).toBe(12);
+    expect((await db.entries.get("e-2"))?.hours).toBe(4);
+  });
+});
+
+describe("DayScreen — сохранение по кнопке (раздел 8.2)", () => {
+  it("правки не уходят в базу, пока кнопку не нажали", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    type(fields().rate, "50");
+
+    // Экран уже показывает пересчитанную сумму, а база — прежнюю.
+    expect(fields().amount).toHaveValue("300");
+    const stored = await db.entries.get("e-1");
+    expect(stored).toMatchObject({ hours: 8, amount: 240, rate_per_hour: 30 });
+  });
+
+  it("кнопка неактивна, пока сохранять нечего", async () => {
+    await db.entries.add(makeEntry({ id: "e-1" }));
+    renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    // «Сохранено» — это состояние, а не молчаливое бездействие: человек видит,
+    // что всё записано.
+    expect(screen.getByRole("button", { name: ru.day.saved })).toBeDisabled();
+
+    type(fields().hours, "6");
+    expect(screen.getByRole("button", { name: ru.day.save })).toBeEnabled();
+  });
+
+  it("открыть день и закрыть, ничего не тронув, — ни вопроса, ни записи", async () => {
+    const { onClose } = renderDay();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(screen.queryByText(ru.day.unsavedTitle)).not.toBeInTheDocument();
+    expect(await db.entries.count()).toBe(0);
+  });
+
+  it("закрытие с несохранёнными правками спрашивает и не закрывает само", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8 }));
+    const { onClose } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("«не сохранять» закрывает и оставляет базу нетронутой", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    const { onClose } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+    fireEvent.click(await screen.findByRole("button", { name: ru.day.unsavedDiscard }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect((await db.entries.get("e-1"))?.hours).toBe(8);
+  });
+
+  it("«сохранить изменения» записывает и только потом закрывает", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    const { onClose } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+    fireEvent.click(await screen.findByRole("button", { name: ru.day.unsavedSave }));
+
+    await waitFor(async () => expect((await db.entries.get("e-1"))?.hours).toBe(6));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("«сохранить» и сразу «закрыть» не теряет закрытие", async () => {
+    // Пока запись шла в Dexie, второй вызов упирался в замок и отвечал
+    // отказом: человек отвечал на вопрос «сохранить изменения», а шторка
+    // молча оставалась на месте.
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    const { onClose } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+
+    const dialogSave = screen.queryByRole("button", { name: ru.day.unsavedSave });
+    if (dialogSave) fireEvent.click(dialogSave);
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(async () => expect((await db.entries.get("e-1"))?.hours).toBe(6));
+    expect(await storedEntries()).toHaveLength(1);
+  });
+
+  it("тап мимо окна оставляет человека в дне, ничего не выбрасывая", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8 }));
+    const { onClose } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+    fireEvent.click(await screen.findByText(ru.day.unsavedBody), undefined);
+    // Клик по самому окну ничего не закрывает; закрывает клик по фону.
+    expect(screen.getByText(ru.day.unsavedTitle)).toBeInTheDocument();
+
+    fireEvent.click(document.querySelector(".day-sheet-overlay")!);
+
+    await waitFor(() => expect(screen.queryByText(ru.day.unsavedTitle)).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    // Набранное осталось на экране: случайный тап мимо не стоит смены.
+    expect(fields().hours).toHaveValue("6");
+  });
+
+  it("новая запись не создаётся, если её бросить", async () => {
+    const { onClose } = renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.close }));
+    fireEvent.click(await screen.findByRole("button", { name: ru.day.unsavedDiscard }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(await db.entries.count()).toBe(0);
   });
 });
 
@@ -515,53 +715,53 @@ describe("DayScreen — время смены", () => {
   it("сохраняет начало, конец и перерыв", async () => {
     renderDay({ settings: { show_shift_times: true } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(screen.getByLabelText(ru.day.startTime), "22:00");
-    await waitFor(async () => expect((await onlyEntry()).start_time).toBe("22:00"));
+    expect((await savedEntry()).start_time).toBe("22:00");
     type(screen.getByLabelText(ru.day.endTime), "06:00");
-    await waitFor(async () => expect((await onlyEntry()).end_time).toBe("06:00"));
+    expect((await savedEntry()).end_time).toBe("06:00");
     type(screen.getByLabelText(ru.day.breakMinutes), "30");
-    await waitFor(async () => expect((await onlyEntry()).break_minutes).toBe(30));
+    expect((await savedEntry()).break_minutes).toBe(30);
 
     type(screen.getByLabelText(ru.day.breakMinutes), "");
-    await waitFor(async () => expect((await onlyEntry()).break_minutes).toBeNull());
+    expect((await savedEntry()).break_minutes).toBeNull();
   });
 
   it("очищенное время времени пишется как null", async () => {
     renderDay({ settings: { show_shift_times: true } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(screen.getByLabelText(ru.day.startTime), "22:00");
-    await waitFor(async () => expect((await onlyEntry()).start_time).toBe("22:00"));
+    expect((await savedEntry()).start_time).toBe("22:00");
     type(screen.getByLabelText(ru.day.startTime), "");
-    await waitFor(async () => expect((await onlyEntry()).start_time).toBeNull());
+    expect((await savedEntry()).start_time).toBeNull();
   });
 
   it("очищенный конец смены пишется как null", async () => {
     renderDay({ settings: { show_shift_times: true } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(screen.getByLabelText(ru.day.endTime), "06:00");
-    await waitFor(async () => expect((await onlyEntry()).end_time).toBe("06:00"));
+    expect((await savedEntry()).end_time).toBe("06:00");
     type(screen.getByLabelText(ru.day.endTime), "");
-    await waitFor(async () => expect((await onlyEntry()).end_time).toBeNull());
+    expect((await savedEntry()).end_time).toBeNull();
   });
 
   it("недописанный перерыв не уезжает в базу как NaN", async () => {
     renderDay({ settings: { show_shift_times: true } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     type(screen.getByLabelText(ru.day.breakMinutes), "-");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect((await onlyEntry()).break_minutes).toBeNull();
+    expect((await savedEntry()).break_minutes).toBeNull();
 
     type(screen.getByLabelText(ru.day.breakMinutes), " ");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect((await onlyEntry()).break_minutes).not.toBeNaN();
+    expect((await savedEntry()).break_minutes).not.toBeNaN();
   });
 });
 
@@ -569,10 +769,10 @@ describe("DayScreen — заметка и закрытие", () => {
   it("сохраняет заметку", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    await onlyEntry();
+    await savedEntry();
 
     fireEvent.change(screen.getByPlaceholderText(ru.day.notePlaceholder), { target: { value: "переработка" } });
-    await waitFor(async () => expect((await onlyEntry()).note).toBe("переработка"));
+    expect((await savedEntry()).note).toBe("переработка");
   });
 
   it("закрывает шторку", () => {
@@ -740,7 +940,7 @@ describe("DayScreen — ряд типов дня (раздел 8.2)", () => {
     // ещё лежат прежние деньги. Проверка поля с последующим чтением базы
     // проходила бы на быстрой машине и падала под нагрузкой.
     await waitFor(async () => {
-      const stored = await onlyEntry();
+      const stored = await savedEntry();
       expect(stored.rate_is_manual).toBe(false);
       expect(stored.rate_source).toBe("period_base");
       expect(stored.amount).toBe(180); // 6 × 30
