@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
-import { getOrCreatePeriod } from "@/db/periods";
+import { findLivePeriodQuery, getOrCreatePeriod } from "@/db/periods";
 import { restoreEntry } from "@/db/entries";
 import type { Entry, Holiday } from "@/types/models";
 import {
@@ -91,9 +91,7 @@ export function CalendarPage() {
 
   const period = useLiveQuery(
     () =>
-      viewed
-        ? db.periods.where("[user_id+year+month]").equals([userId, viewed.year, viewed.month]).first()
-        : undefined,
+      viewed ? findLivePeriodQuery(db, userId, viewed.year, viewed.month).first() : undefined,
     [viewed],
   );
 
@@ -150,9 +148,7 @@ export function CalendarPage() {
 
   const previousPeriod = useLiveQuery(
     () =>
-      previous
-        ? db.periods.where("[user_id+year+month]").equals([userId, previous.year, previous.month]).first()
-        : undefined,
+      previous ? findLivePeriodQuery(db, userId, previous.year, previous.month).first() : undefined,
     [previous],
   );
 

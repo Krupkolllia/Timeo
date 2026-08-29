@@ -333,9 +333,12 @@ describe("CalendarPage — отмена удаления (раздел 9)", () =
     fireEvent.click(await screen.findByRole("button", { name: ru.day.deleteEntry }));
     await screen.findByText(ru.day.deletedNotice);
 
-    // Таймер первой плашки сброшен: через 3 секунды после второго удаления
-    // окно отмены обязано быть ещё открыто.
-    await vi.advanceTimersByTimeAsync(3000);
+    // Таймер первой плашки сброшен: её остаток — 2 секунды, и если бы он
+    // продолжал идти, окно закрылось бы. Промотка чуть больше остатка, а не на
+    // те же 3 секунды: с shouldAdvanceTime реальное время тоже идёт в зачёт
+    // таймеру, и под нагрузкой (полный прогон, CI) секунды между кликами
+    // съедали новое пятисекундное окно целиком — тест падал на ровном месте.
+    await vi.advanceTimersByTimeAsync(2500);
     expect(screen.getByText(ru.day.deletedNotice)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: ru.day.undo }));
@@ -580,5 +583,28 @@ describe("CalendarPage — праздники (раздел 8.1)", () => {
         `/settings/holidays?add=2026-08-10&return=${encodeURIComponent("/?day=2026-08-10")}`,
       ),
     );
+  });
+});
+
+describe("CalendarPage — ручной исторический период (раздел 8.7)", () => {
+  it("нижняя панель показывает вписанные итоги, а не сумму записей (инвариант 5)", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(
+      makePeriod({
+        year: 2026,
+        month: 8,
+        is_manual: true,
+        is_closed: true,
+        closed_totals: { amount: 1500.5, total_hours: 100, norm_hours_covered: 100 },
+      }),
+    );
+    await db.entries.add(makeEntry({ id: "e-stray", date: "2026-08-11", amount: 240, hours: 8 }));
+
+    renderCalendar();
+    await ready();
+
+    expect(await screen.findByText("1500.50 PLN")).toBeInTheDocument();
+    expect(await screen.findByText("100 ч")).toBeInTheDocument();
   });
 });

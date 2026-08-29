@@ -293,6 +293,22 @@ describe("PeriodSummaryPage — смена базовой ставки (разд
     expect(await screen.findByText(`${ru.period.recalculatedNotice}: 1`)).toBeInTheDocument();
   });
 
+  it("набранная ставка не стирается эхом обновлённой строки периода", async () => {
+    await seed();
+    renderPage();
+    const rate = (await ready()) as HTMLInputElement;
+
+    fireEvent.change(rate, { target: { value: "50" } });
+    // Строка периода обновилась сама (наш же пересчёт, правка с другого
+    // устройства): раньше на это был подвешен сброс черновика, и набранное
+    // число молча исчезало вместе с кнопкой сохранения.
+    await db.periods.update("p-2026-08", { base_rate: 45 });
+
+    await waitFor(async () => expect((await db.periods.get("p-2026-08"))?.base_rate).toBe(45));
+    expect(await screen.findByLabelText(ru.period.baseRate)).toHaveValue("50");
+    expect(screen.getByRole("button", { name: ru.period.baseRateSave })).toBeInTheDocument();
+  });
+
   it("«с даты» замораживает ставку более ранних записей", async () => {
     await seed();
     await db.entries.bulkAdd([
@@ -427,5 +443,81 @@ describe("PeriodSummaryPage — закрытие и переоткрытие (и
     fireEvent.click(screen.getByRole("button", { name: ru.period.reopen }));
     fireEvent.click(screen.getByText(ru.period.reopenConfirmTitle));
     expect(screen.getByText(ru.period.reopenConfirmTitle)).toBeInTheDocument();
+  });
+});
+
+describe("PeriodSummaryPage — ручной период и вход в экраны данных (блок 6)", () => {
+  it("ручной период показывает вписанные итоги, а не сумму записей (инвариант 5)", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.bulkAdd([hourly, unpaid]);
+    await db.periods.add(
+      makePeriod({
+        is_manual: true,
+        is_closed: true,
+        closed_totals: { amount: 1500.5, total_hours: 100, norm_hours_covered: 100 },
+      }),
+    );
+    // Запись внутри диапазона месяца: у ручного периода её быть не должно, но
+    // если она там оказалась, суммироваться она не имеет права.
+    await db.entries.add(makeEntry({ id: "e-stray", date: "2026-08-11", amount: 240 }));
+
+    renderPage();
+    await ready();
+
+    expect(await screen.findByText("1500.50 PLN")).toBeInTheDocument();
+    expect(screen.queryByText("1740.50 PLN")).not.toBeInTheDocument();
+  });
+
+  it("у ручного периода нет предупреждения про нулевую ставку: часы по ней не считаются", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.bulkAdd([hourly, unpaid]);
+    await db.periods.add(
+      makePeriod({
+        base_rate: 0,
+        is_manual: true,
+        is_closed: true,
+        closed_totals: { amount: 1500.5, total_hours: 100, norm_hours_covered: 100 },
+      }),
+    );
+
+    renderPage();
+    await ready();
+
+    expect(screen.getByText(ru.period.hintZeroBaseRate).className).toContain("invisible");
+  });
+
+  it("ведёт в прошлые периоды и в экспорт, возвращая на этот же период", async () => {
+    await seed();
+    renderPage("?year=2026&month=8");
+    await ready();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.period.pastPeriods }));
+    expect(screen.getByTestId("location").textContent).toBe(
+      `/settings/past-periods?return=${encodeURIComponent("/period?year=2026&month=8")}`,
+    );
+  });
+
+  it("вход в экспорт несёт тот же return=", async () => {
+    await seed();
+    renderPage("?year=2026&month=8");
+    await ready();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.period.exportRestore }));
+    expect(screen.getByTestId("location").textContent).toBe(
+      `/settings/export?return=${encodeURIComponent("/period?year=2026&month=8")}`,
+    );
+  });
+
+  it("мягко удалённый период не показывается как существующий (инвариант 38)", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.bulkAdd([hourly, unpaid]);
+    await db.periods.add(makePeriod({ deleted_at: "2026-08-20T00:00:00.000Z", base_rate: 99 }));
+
+    renderPage("?year=2026&month=8");
+
+    // Экран заводит период заново по правилам раздела 5.2 — со ставкой из
+    // настроек, а не со ставкой удалённой строки.
+    const rate = (await ready()) as HTMLInputElement;
+    await waitFor(() => expect(rate).not.toHaveValue("99"));
   });
 });

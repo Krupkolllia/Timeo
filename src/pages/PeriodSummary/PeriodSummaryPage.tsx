@@ -3,7 +3,14 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
-import { applyBaseRateChange, closePeriod, getOrCreatePeriod, reopenPeriod, updatePeriod } from "@/db/periods";
+import {
+  applyBaseRateChange,
+  closePeriod,
+  findLivePeriodQuery,
+  getOrCreatePeriod,
+  reopenPeriod,
+  updatePeriod,
+} from "@/db/periods";
 import { NumberInput } from "@/components/NumberInput";
 import { RateChangeDialog } from "@/pages/PeriodSummary/RateChangeDialog";
 import {
@@ -78,9 +85,7 @@ export function PeriodSummaryPage() {
 
   const period = useLiveQuery(
     () =>
-      viewed
-        ? db.periods.where("[user_id+year+month]").equals([userId, viewed.year, viewed.month]).first()
-        : undefined,
+      viewed ? findLivePeriodQuery(db, userId, viewed.year, viewed.month).first() : undefined,
     [viewed],
   );
 
@@ -104,7 +109,7 @@ export function PeriodSummaryPage() {
   const next = useMemo(() => (viewed ? getAdjacentPeriod(viewed.year, viewed.month, 1) : null), [viewed]);
   const nextPeriod = useLiveQuery(
     () =>
-      next ? db.periods.where("[user_id+year+month]").equals([userId, next.year, next.month]).first() : undefined,
+      next ? findLivePeriodQuery(db, userId, next.year, next.month).first() : undefined,
     [next],
   );
 
@@ -126,10 +131,8 @@ export function PeriodSummaryPage() {
   const [rateDraft, setRateDraft] = useState<number | null>(null);
   const syncedRateRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!period) return;
-    const key = `${period.id}:${period.base_rate}`;
-    if (syncedRateRef.current === key) return;
-    syncedRateRef.current = key;
+    if (!period || syncedRateRef.current === period.id) return;
+    syncedRateRef.current = period.id;
     setRateDraft(null);
   }, [period]);
 
@@ -169,12 +172,15 @@ export function PeriodSummaryPage() {
       fromDateISO,
       periodStartDay: settings.period_start_day,
     });
-    if (mode === "apply_next_period") {
-      // Текущий период не изменился — возвращаем поле к его собственной ставке,
-      // иначе на экране осталось бы число, которого в этом месяце нет.
-      setRateDraft(null);
-      return;
-    }
+    // Черновик снимаем сами, сразу после записи, а не по эху из Dexie.
+    // Раньше сброс висел на изменении period.base_rate, и между записью и
+    // приходом обновлённой строки помещался целый ввод: человек применял 40,
+    // тут же вписывал 50, эхо первой правки приходило следом и стирало
+    // набранное — диалог применял ту же сорок ещё раз, а введённая ставка
+    // пропадала молча. Для «со следующего периода» смысл тот же: текущий
+    // период не изменился, и в поле должна вернуться его собственная ставка.
+    setRateDraft(null);
+    if (mode === "apply_next_period") return;
     if (recalculatedTimeoutRef.current) clearTimeout(recalculatedTimeoutRef.current);
     setRecalculatedCount(result.updatedEntries);
     recalculatedTimeoutRef.current = setTimeout(() => setRecalculatedCount(null), 4000);
@@ -187,6 +193,9 @@ export function PeriodSummaryPage() {
   }
 
   const label = getPeriodLabel(viewed.year, viewed.month, settings.period_start_day, settings.period_naming);
+  // Куда вернуть пользователя с экранов данных: именно на этот период, а не на
+  // «текущий» — с открытого июля возврат в август был бы подменой месяца.
+  const summaryPath = `/period?year=${viewed.year}&month=${viewed.month}`;
   const nextLabelId = next
     ? getPeriodLabel(next.year, next.month, settings.period_start_day, settings.period_naming)
     : label;
@@ -245,7 +254,11 @@ export function PeriodSummaryPage() {
               </button>
             )}
           </div>
-          <p className={`mt-1 text-xs text-white/40 ${rateValue === 0 ? "" : "invisible"}`}>
+          {/* У ручного периода (раздел 8.7) базовой ставки не существует:
+              человек вписал итог за месяц, часы по ней не считаются вовсе, и
+              предупреждение «часы будут считаться по нулю» было бы просто
+              неправдой на экране, который обязан объяснять числа (инвариант 55). */}
+          <p className={`mt-1 text-xs text-white/40 ${rateValue === 0 && !period.is_manual ? "" : "invisible"}`}>
             {ru.period.hintZeroBaseRate}
           </p>
           {/* Высота строки зарезервирована всегда: появляясь на 4 секунды, она
@@ -366,6 +379,29 @@ export function PeriodSummaryPage() {
             {ru.period.closePeriod}
           </button>
         )}
+
+        {/* Единственный вход в прошлые периоды (раздел 8.7) и в экспорт с
+            восстановлением (раздел 8.8) до блока 7: /settings пока пуст, а
+            восстановление нужно ровно на устройстве, где данных нет вовсе, —
+            туда ведёт панель итогов календаря, одно нажатие с главного экрана.
+            return= возвращает на этот же период, как в типах дня и праздниках. */}
+        <div>
+          <p className="text-xs text-white/50">{ru.period.dataSection}</p>
+          <div className="mt-2 flex flex-col gap-2">
+            <button
+              className="min-h-11 rounded-lg bg-white/5 px-3 py-3 text-left text-sm active:bg-white/10"
+              onClick={() => navigate(`/settings/past-periods?return=${encodeURIComponent(summaryPath)}`)}
+            >
+              {ru.period.pastPeriods}
+            </button>
+            <button
+              className="min-h-11 rounded-lg bg-white/5 px-3 py-3 text-left text-sm active:bg-white/10"
+              onClick={() => navigate(`/settings/export?return=${encodeURIComponent(summaryPath)}`)}
+            >
+              {ru.period.exportRestore}
+            </button>
+          </div>
+        </div>
       </div>
 
       {rateDialogOpen && (
