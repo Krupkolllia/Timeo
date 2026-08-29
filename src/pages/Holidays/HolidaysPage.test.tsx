@@ -254,7 +254,9 @@ describe("HolidaysPage — возврат после ?add=", () => {
     await waitFor(async () => expect(await db.holidays.count()).toBe(1));
     // Пользователь вернулся в список сам — значит, остаётся в нём.
     expect(currentLocation()).toBe("/settings/holidays?add=2026-08-10&return=%2F%3Fday%3D2026-08-10");
-    expect(screen.getByText("День фирмы")).toBeInTheDocument();
+    // findBy, а не getBy: строка в базе уже есть, но перерисовка списка идёт
+    // отдельным тактом — под нагрузкой getBy успевал раньше него.
+    expect(await screen.findByText("День фирмы")).toBeInTheDocument();
   });
 });
 
@@ -288,5 +290,27 @@ describe("HolidaysPage — незаконченный ввод даты", () => 
     fireEvent.click(screen.getByRole("button", { name: ru.holidays.save }));
 
     await waitFor(async () => expect((await db.holidays.toArray())[0].date).toBe("2026-08-10"));
+  });
+});
+
+describe("HolidaysPage — двойной тап по «Сохранить»", () => {
+  it("создаёт одну запись, а не две", async () => {
+    await seed();
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: ru.holidays.add }));
+    fireEvent.change(screen.getByLabelText(ru.holidays.date), { target: { value: "2026-09-09" } });
+    fireEvent.change(screen.getByLabelText(ru.holidays.name), { target: { value: "Двойной тап" } });
+
+    // Форма закрывается только после записи, поэтому до тех пор кнопка на
+    // месте и успевает получить второй тап.
+    const save = screen.getByRole("button", { name: ru.holidays.save });
+    fireEvent.click(save);
+    fireEvent.click(save);
+
+    await waitFor(async () => expect(await db.holidays.count()).toBe(1));
+    // Ждём закрытия формы, чтобы вторая запись не появилась уже после проверки.
+    expect(await screen.findByRole("heading", { name: ru.holidays.multipliersTitle })).toBeInTheDocument();
+    expect(await db.holidays.count()).toBe(1);
   });
 });

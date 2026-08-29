@@ -46,6 +46,13 @@ export function HolidaysPage() {
   const [draftName, setDraftName] = useState("");
   const [pendingUndo, setPendingUndo] = useState<Holiday | null>(null);
   const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Синхронный замок на сохранение. Форма закрывается только ПОСЛЕ записи, и
+  // до тех пор кнопка на месте: быстрый двойной тап успевает вызвать
+  // handleSave дважды и создаёт две одинаковые строки. Два праздника на одну
+  // дату законны (инвариант 53), поэтому ничто об этом не предупредит —
+  // человек просто увидит дубль и пойдёт удалять. Тот же приём, что у
+  // creatingRef в шторке дня.
+  const savingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -86,9 +93,15 @@ export function HolidaysPage() {
   }
 
   async function handleSave() {
-    // Ничего не проверяем: пустое имя, дата в прошлом и повтор даты сохраняются
-    // как есть (инвариант 56, раздел 9).
-    await createHoliday(db, userId, { date: ISO_DATE.test(draftDate) ? draftDate : lastValidDate, name: draftName });
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      // Ничего не проверяем: пустое имя, дата в прошлом и повтор даты
+      // сохраняются как есть (инвариант 56, раздел 9).
+      await createHoliday(db, userId, { date: ISO_DATE.test(draftDate) ? draftDate : lastValidDate, name: draftName });
+    } finally {
+      savingRef.current = false;
+    }
     setFormOpen(false);
     setDraftName("");
     // Пришли из дня ради конкретной даты — возвращаем туда же.
