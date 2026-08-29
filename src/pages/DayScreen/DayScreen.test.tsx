@@ -40,6 +40,7 @@ function renderDay({ date = DATE, dayTypes = [hourly, night, unpaid, fixed, vaca
   const onOpenPeriod = vi.fn();
   const onEntryDeleted = vi.fn();
   const onCreateDayType = vi.fn();
+  const onOpenHolidays = vi.fn();
   const view = render(
     <DayScreen
       date={date}
@@ -51,9 +52,10 @@ function renderDay({ date = DATE, dayTypes = [hourly, night, unpaid, fixed, vaca
       onOpenPeriod={onOpenPeriod}
       onEntryDeleted={onEntryDeleted}
       onCreateDayType={onCreateDayType}
+      onOpenHolidays={onOpenHolidays}
     />,
   );
-  return { onClose, onOpenPeriod, onEntryDeleted, onCreateDayType, ...view };
+  return { onClose, onOpenPeriod, onEntryDeleted, onCreateDayType, onOpenHolidays, ...view };
 }
 
 function fields() {
@@ -205,7 +207,7 @@ describe("DayScreen — подпись источника множителя", (
   ])("%s", async (_name, date, label) => {
     renderDay({ date, settings: { weekend_multipliers: { saturday: 1.5, sunday: 2, holiday: 2.5 } } });
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
-    expect(await screen.findByText(new RegExp(label))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`${label}, ×`))).toBeInTheDocument();
   });
 
   it("праздник перебивает выходной", async () => {
@@ -215,7 +217,7 @@ describe("DayScreen — подпись источника множителя", (
     await db.holidays.add(makeHoliday({ date: SUNDAY }));
     renderDay({ date: SUNDAY, settings: { weekend_multipliers: { saturday: 1.5, sunday: 2, holiday: 2.5 } } });
 
-    expect(await screen.findByText(new RegExp(ru.day.multiplierSourceHoliday))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceHoliday}, ×`))).toBeInTheDocument();
     expect(fields().multiplier).toHaveValue("2.5");
 
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
@@ -225,7 +227,7 @@ describe("DayScreen — подпись источника множителя", (
   it("тип дня со своим множителем подписан как тип дня", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
-    expect(await screen.findByText(new RegExp(ru.day.multiplierSourceDayType))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceDayType}, ×`))).toBeInTheDocument();
   });
 
   it("отпуск не получает воскресный множитель", async () => {
@@ -250,7 +252,7 @@ describe("DayScreen — подпись источника множителя", (
     renderDay({ date: SUNDAY, dayTypes: [hourly, paidVacation] });
     fireEvent.click(screen.getByRole("button", { name: "Оплачиваемый отпуск" }));
 
-    expect(await screen.findByText(new RegExp(ru.day.multiplierSourceDayType))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceDayType}, ×`))).toBeInTheDocument();
     await waitFor(async () => expect((await onlyEntry()).multiplier).toBe(0.8));
   });
 
@@ -260,7 +262,7 @@ describe("DayScreen — подпись источника множителя", (
     await onlyEntry();
 
     type(fields().multiplier, "3");
-    expect(await screen.findByText(new RegExp(ru.day.multiplierSourceManual))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(`${ru.day.multiplierSourceManual}, ×`))).toBeInTheDocument();
   });
 });
 
@@ -770,5 +772,38 @@ describe("DayScreen — ряд типов дня (раздел 8.2)", () => {
     expect(fields().rate).toHaveValue("55");
     expect(fields().amount).toHaveValue("440"); // 8 × 55, без ×2
     expect(screen.getByText(new RegExp(ru.day.multiplierSourcePinned))).toBeInTheDocument();
+  });
+});
+
+describe("DayScreen — вход в экран праздников (раздел 8.6)", () => {
+  it("на непраздничном дне предлагает отметить праздником и передаёт дату", async () => {
+    const { onOpenHolidays } = renderDay();
+
+    const row = await screen.findByText(ru.day.holidayRowNone);
+    fireEvent.click(row);
+    expect(onOpenHolidays).toHaveBeenCalledWith({ addDate: DATE });
+  });
+
+  it("на празднике показывает его название и ведёт в список без даты", async () => {
+    await db.holidays.add(makeHoliday({ date: DATE, name: "Успение Пресвятой Богородицы" }));
+    const { onOpenHolidays } = renderDay();
+
+    const row = await screen.findByText(/Успение Пресвятой Богородицы/);
+    fireEvent.click(row);
+    expect(onOpenHolidays).toHaveBeenCalledWith({});
+  });
+
+  it("инвариант 53: из двух праздников на дате подписывает самый ранний по created_at", async () => {
+    // Идентификаторы намеренно идут против created_at: раньше экран брал
+    // .first() по индексу date, то есть строку с меньшим id, и на этой паре
+    // назвал бы «День фирмы».
+    await db.holidays.bulkAdd([
+      makeHoliday({ id: "a-late", date: DATE, name: "День фирмы", created_at: "2026-03-01T00:00:00.000Z" }),
+      makeHoliday({ id: "z-early", date: DATE, name: "Успение", created_at: "2026-01-01T00:00:00.000Z" }),
+    ]);
+    renderDay();
+
+    expect(await screen.findByText(/Успение/)).toBeInTheDocument();
+    expect(screen.queryByText(/День фирмы/)).not.toBeInTheDocument();
   });
 });

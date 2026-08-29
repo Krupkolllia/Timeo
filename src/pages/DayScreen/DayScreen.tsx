@@ -11,6 +11,7 @@ import {
   type EntryDefaults,
 } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
+import { pickHoliday } from "@/lib/calc/holidays";
 import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
@@ -34,6 +35,10 @@ interface DayScreenProps {
   // Раздел 8.2: последним в ряду типов стоит плюс, ведущий прямо в создание
   // типа дня — «типы чаще всего нужны в тот момент, когда нужного нет».
   onCreateDayType: () => void;
+  // Единственный вход в экран праздников (раздел 8.6): в /settings не ведёт
+  // ничего до блока 7, а множитель праздника задаётся именно там. addDate
+  // непустой — открыть форму добавления с уже подставленной датой.
+  onOpenHolidays: (options: { addDate?: string }) => void;
 }
 
 // Форма записи, которой оперирует экран. Совпадает с редактируемыми полями Entry,
@@ -131,6 +136,7 @@ export function DayScreen({
   onEntryDeleted,
   onOpenPeriod,
   onCreateDayType,
+  onOpenHolidays,
 }: DayScreenProps) {
   const activeDayTypes = useMemo(
     // deleted_at === null — инвариант 38: мягко удалённые строки не участвуют
@@ -153,13 +159,19 @@ export function DayScreen({
       (await listActiveEntriesForDate(db, userId, date)).sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [userId, date],
   );
+  // Инвариант 53: на дате может лежать несколько праздников, и решает не
+  // порядок, в котором их отдал Dexie (внутри одного значения индекса он не
+  // гарантирован), а pickHoliday. Прежний .first() отвечал на этот вопрос
+  // произвольно и вдобавок расходился с планировщиком раздела 6.7.
   const holiday = useLiveQuery(
-    () =>
-      db.holidays
-        .where("date")
-        .equals(date)
-        .filter((h) => h.user_id === userId && h.deleted_at === null)
-        .first(),
+    async () =>
+      pickHoliday(
+        await db.holidays
+          .where("date")
+          .equals(date)
+          .filter((h) => h.user_id === userId && h.deleted_at === null)
+          .toArray(),
+      ),
     [userId, date],
   );
 
@@ -684,6 +696,29 @@ export function DayScreen({
               {ru.day.payModeFixedAmount}
             </div>
           )}
+
+          {/* Раздел 8.6: вход в список праздников и в множитель праздника —
+              отсюда, потому что до блока 7 в /settings не ведёт ничего, а
+              «праздник» под множителем иначе остаётся подписью, на которую
+              нельзя повлиять.
+
+              Строка рисуется в обоих состояниях с одинаковой структурой:
+              условный ряд, появляющийся только по праздникам, двигал бы всё
+              ниже себя ровно в тот момент, когда пользователь целится в поле
+              суммы. */}
+          <button
+            onClick={() => onOpenHolidays(holiday ? {} : { addDate: date })}
+            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+          >
+            {/* min-w-0 + truncate: имя праздника пользовательское и длины
+                произвольной, а выталкивать кнопку за край нельзя (инвариант 26). */}
+            <span className="min-w-0 truncate text-xs text-white/50">
+              {holiday ? `${ru.day.holidayRowPrefix} ${holiday.name}` : ru.day.holidayRowNone}
+            </span>
+            <span className="shrink-0 text-xs font-semibold text-app-accent">
+              {holiday ? ru.day.holidayRowEdit : ru.day.holidayRowAdd}
+            </span>
+          </button>
 
           {/* Раздел 8.4: базовая ставка периода правится на экране периода, а не
               здесь, поэтому подсказка не поле, а путь туда. Ряд на всю ширину,

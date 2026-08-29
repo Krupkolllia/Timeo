@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
   default_norm_hours: 160,
   default_base_rate_from_period: null,
   preferred_rate_change_mode: null,
+  seeded_holiday_years: [],
 };
 
 export async function ensureSettings(db: TimeoDB, userId: string): Promise<Settings> {
@@ -39,4 +40,21 @@ export async function ensureSettings(db: TimeoDB, userId: string): Promise<Setti
     await db.settings.add(settings);
     return settings;
   });
+}
+
+/**
+ * Раздел 8.4: множители выходных и праздника. Экран настроек — блок 7, а без
+ * этих трёх полей праздник не значит ничего (множитель по умолчанию 1), поэтому
+ * блок 5 показывает их на экране праздников (раздел 8.6).
+ *
+ * Инвариант 51: пересчёта здесь нет и быть не может — таблица entries не
+ * открывается вовсе. Множитель влияет только на то, что ПРЕДЛАГАЕТСЯ новым
+ * записям.
+ */
+export async function updateWeekendMultipliers(
+  db: TimeoDB,
+  id: string,
+  multipliers: Settings["weekend_multipliers"],
+): Promise<void> {
+  await db.settings.update(id, { weekend_multipliers: multipliers, updated_at: new Date().toISOString() });
 }

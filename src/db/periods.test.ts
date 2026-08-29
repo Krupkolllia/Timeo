@@ -143,6 +143,7 @@ async function seedSettings(database: TimeoDB): Promise<Settings> {
     default_norm_hours: 168,
     default_base_rate_from_period: null,
     preferred_rate_change_mode: null,
+    seeded_holiday_years: [],
   };
   await database.settings.add(row);
   return row;

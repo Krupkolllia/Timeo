@@ -132,6 +132,7 @@ async function seedOpenPeriodAndSettings(database: TimeoDB): Promise<string> {
     default_norm_hours: 168,
     default_base_rate_from_period: null,
     preferred_rate_change_mode: null,
+    seeded_holiday_years: [],
   });
   const id = crypto.randomUUID();
   await database.periods.add({

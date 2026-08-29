@@ -646,4 +646,91 @@ describe("TimeoDB schema migration", () => {
 
     upgraded.close();
   });
+  it("fills in seeded_holiday_years on settings rows written before v7", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const settings = await upgraded.settings.get("s1");
+    expect(settings?.seeded_holiday_years).toEqual([]);
+    // updated_at не трогаем — иначе при синхронизации (блок 8) настройки разом
+    // уедут в облако как «изменённые».
+    expect(settings?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("keeps seeded_holiday_years that a settings row already carries", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings({ seeded_holiday_years: [2026] }));
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    // Иначе миграция «переоткрыла» бы уже засеянный год и вернула праздники,
+    // которые пользователь удалил.
+    expect((await upgraded.settings.get("s1"))?.seeded_holiday_years).toEqual([2026]);
+
+    upgraded.close();
+  });
+
+  it("changes no stored amount, no closed period and no holiday when upgrading to v7", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").bulkAdd([
+      legacyPeriod({
+        id: "p-closed",
+        year: 2026,
+        month: 7,
+        base_rate: 30,
+        is_closed: true,
+        closed_totals: { amount: 240, total_hours: 8, norm_hours_covered: 8 },
+      }),
+      legacyPeriod({ id: "p-open", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+    await legacy.table("day_types").add(legacyDayType());
+    await legacy.table("entries").bulkAdd([
+      legacyEntry({ id: "closed", date: "2026-07-10", amount: 240 }),
+      legacyEntry({ id: "open-a", date: "2026-08-10", amount: 240 }),
+      legacyEntry({ id: "open-b", date: "2026-08-11", hours: 6, amount: 180 }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entries = await upgraded.entries.toArray();
+    const sumFor = (prefix: string) =>
+      roundMoney(entries.filter((e) => e.date.startsWith(prefix)).reduce((sum, e) => sum + e.amount, 0));
+    expect(sumFor("2026-07")).toBe(240);
+    expect(sumFor("2026-08")).toBe(420);
+    for (const entry of entries) expect(entry.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    const closedPeriod = await upgraded.periods.get("p-closed");
+    expect(closedPeriod?.is_closed).toBe(true);
+    expect(closedPeriod?.closed_totals?.amount).toBe(240);
+    expect(closedPeriod?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    // Миграция не засевает праздники: посев — это отдельный шаг запуска,
+    // который спрашивает settings.seeded_holiday_years.
+    expect(await upgraded.holidays.count()).toBe(0);
+
+    upgraded.close();
+  });
 });

@@ -3,6 +3,7 @@ import type { BaseRecord, DayType, Entry, Holiday, Settings } from "@/types/mode
 import { getPeriodDateRange } from "@/lib/calc/period";
 import { toISODate } from "@/lib/calc/calendarGrid";
 import { planDayTypeChange } from "@/lib/calc/dayTypeChange";
+import { buildHolidayByDate } from "@/lib/calc/holidays";
 
 type PresetDayType = Pick<
   DayType,
@@ -335,7 +336,11 @@ async function planForPeriod(
     period,
     periodStartISO: startISO,
     periodEndISO: endISO,
-    holidayByDate: new Map(holidays.map((holiday) => [holiday.date, holiday])),
+    // Инвариант 53: внутри одной даты побеждает самый ранний по created_at.
+    // Прежний new Map(...) оставлял ПОСЛЕДНЮЮ строку — то есть отвечал на этот
+    // вопрос ровно наоборот, чем экран дня с его .first(). Теперь ответ один и
+    // тот же и живёт в одной чистой функции.
+    holidayByDate: buildHolidayByDate(holidays),
     weekendMultipliers: scope.weekendMultipliers,
   });
 }
