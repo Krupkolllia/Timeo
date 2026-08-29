@@ -31,6 +31,9 @@ interface DayScreenProps {
   // закрытие листа уносило бы с собой единственную кнопку отмены (раздел 8 ТЗ
   // требует настоящее окно отмены, а не "пока открыт диалог").
   onEntryDeleted: (entry: Entry) => void;
+  // Раздел 8.2: последним в ряду типов стоит плюс, ведущий прямо в создание
+  // типа дня — «типы чаще всего нужны в тот момент, когда нужного нет».
+  onCreateDayType: () => void;
 }
 
 // Форма записи, которой оперирует экран. Совпадает с редактируемыми полями Entry,
@@ -127,9 +130,17 @@ export function DayScreen({
   onClose,
   onEntryDeleted,
   onOpenPeriod,
+  onCreateDayType,
 }: DayScreenProps) {
   const activeDayTypes = useMemo(
-    () => [...dayTypes].filter((dt) => !dt.is_archived).sort((a, b) => a.sort_order - b.sort_order),
+    // deleted_at === null — инвариант 38: мягко удалённые строки не участвуют
+    // ни в одной выборке. Архивные скрыты по инварианту 11: они исчезают из
+    // выбора, но продолжают рисоваться на старых записях, поэтому dayTypeById
+    // ниже строится по полному списку.
+    () =>
+      [...dayTypes]
+        .filter((dt) => !dt.is_archived && dt.deleted_at === null)
+        .sort((a, b) => a.sort_order - b.sort_order),
     [dayTypes],
   );
   const dayTypeById = useMemo(() => new Map(dayTypes.map((dt) => [dt.id, dt])), [dayTypes]);
@@ -509,23 +520,57 @@ export function DayScreen({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2">
-        {activeDayTypes.length === 0 && <p className="col-span-3 text-sm text-white/50">{ru.day.noDayTypes}</p>}
+      {/* Раздел 8.2: горизонтальный ряд крупных кружков, по одному на тип дня,
+          окрашенных его цветом, со значком внутри. Ряд, а не сетка: типов
+          бывает десяток, и сетка из имён занимала бы треть шторки. shrink-0 на
+          элементах обязателен — иначе flex сжимает кружки в овалы вместо того,
+          чтобы включить прокрутку. */}
+      {/* shrink-0 на самом ряду обязателен: шторка ограничена 85dvh, и как
+          flex-элемент колонки ряд сжимался до 4px — кружки превращались в
+          полоски 56×24, а кнопки получали нулевую высоту. Самый нужный
+          элемент экрана оказывался невидимым ровно тогда, когда полей в
+          шторке много. */}
+      <div className="-mx-4 flex shrink-0 gap-3 overflow-x-auto px-4 pb-1">
+        {activeDayTypes.length === 0 && <p className="text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
           const isSelected = draft?.day_type_id === dt.id;
           return (
             <button
               key={dt.id}
               onClick={() => handleSelectDayType(dt)}
-              className={`rounded-xl px-2 py-3 text-sm font-medium ${
-                isSelected ? "text-slate-900" : "bg-white/5 text-white active:bg-white/10"
-              }`}
-              style={isSelected ? { backgroundColor: dt.color } : undefined}
+              aria-pressed={isSelected}
+              className="flex w-16 shrink-0 flex-col items-center gap-1"
+              title={dt.note || undefined}
             >
-              {dt.name}
+              {/* aria-hidden: значок дублирует имя, стоящее рядом, и без этого
+                  доступное имя кнопки превращается в «Н Ночная смена». */}
+              <span
+                aria-hidden
+                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-semibold text-slate-900 ${
+                  isSelected ? "ring-2 ring-white" : ""
+                }`}
+                style={{ backgroundColor: dt.color }}
+              >
+                {dt.label}
+              </span>
+              {/* Имя под кружком: значок из 1–3 символов сам по себе опознаётся
+                  не всегда, а «Отпуск» и «Отгул» дают одну и ту же букву. */}
+              <span className={`w-full truncate text-center text-[11px] ${isSelected ? "text-white" : "text-white/50"}`}>
+                {dt.name}
+              </span>
             </button>
           );
         })}
+        <button
+          onClick={onCreateDayType}
+          aria-label={ru.day.createDayType}
+          className="flex w-16 shrink-0 flex-col items-center gap-1"
+        >
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-dashed border-white/30 text-xl text-white/60">
+            +
+          </span>
+          <span className="w-full truncate text-center text-[11px] text-white/50">{ru.day.createDayTypeShort}</span>
+        </button>
       </div>
 
       {draft && dayType && (

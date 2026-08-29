@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
@@ -27,9 +27,18 @@ const userId = getLocalUserId();
 
 export function CalendarPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [viewed, setViewed] = useState<PeriodId | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [openDayDate, setOpenDayDate] = useState<string | null>(null);
+  // ?day= открывает шторку сразу: экран типов дня (раздел 8.2 — плюс в ряду
+  // типов) уводит с календаря целиком, и без этого возврат высаживал бы
+  // пользователя на пустой календарь вместо дня, ради которого он уходил.
+  // Формат проверяем: адрес приходит извне, а строка неизвестного вида ушла бы
+  // прямиком в запрос по дате.
+  const [openDayDate, setOpenDayDate] = useState<string | null>(() => {
+    const day = searchParams.get("day");
+    return day !== null && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+  });
   // Плашка "отменить" живёт на уровне календаря, а не внутри bottom sheet:
   // удаление записи закрывает экран дня сразу, и окно отмены (раздел 8 ТЗ)
   // должно пережить это закрытие, а не исчезать вместе с диалогом.
@@ -330,6 +339,9 @@ export function CalendarPage() {
               onClose={() => setOpenDayDate(null)}
               onEntryDeleted={handleEntryDeleted}
               onOpenPeriod={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
+              onCreateDayType={() =>
+                navigate(`/settings/day-types?new=1&return=${encodeURIComponent(`/?day=${openDayDate}`)}`)
+              }
             />
           </div>
         </div>

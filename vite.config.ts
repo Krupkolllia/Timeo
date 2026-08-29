@@ -111,8 +111,8 @@ export default defineConfig({
         "src/types/**",
         "src/i18n/**",
         "src/lib/export/backup.ts",
-        // Заглушки блоков 5–7: пустой div, покрывать нечего.
-        "src/pages/DayTypes/**",
+        // Заглушки блоков 5–7: пустой div, покрывать нечего. DayTypes из
+        // списка убран — блок 4 наполнил экран, и он покрывается тестами.
         "src/pages/Holidays/**",
         "src/pages/PastPeriods/**",
         "src/pages/ExportRestore/**",

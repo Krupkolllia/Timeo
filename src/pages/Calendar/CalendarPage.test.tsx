@@ -16,13 +16,14 @@ function LocationProbe() {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 }
 
-function renderCalendar() {
+function renderCalendar(initialEntry = "/") {
   render(
-    <MemoryRouter initialEntries={["/"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <LocationProbe />
       <Routes>
         <Route path="/" element={<CalendarPage />} />
         <Route path="/period" element={<p>итоги периода</p>} />
+        <Route path="/settings/day-types" element={<p>типы дней</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -352,5 +353,46 @@ describe("CalendarPage — отмена удаления (раздел 9)", () =
     await vi.advanceTimersByTimeAsync(5000);
     await waitFor(() => expect(screen.queryByText(ru.day.deletedNotice)).not.toBeInTheDocument());
     expect((await db.entries.get("e-1"))?.deleted_at).not.toBeNull();
+  });
+});
+
+describe("CalendarPage — вход в создание типа дня (раздел 8.2)", () => {
+  it("плюс в ряду типов уводит в создание и запоминает день, куда вернуться", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    renderCalendar();
+    await ready();
+
+    fireEvent.click(dayCell("2026-08-10"));
+    fireEvent.click(await screen.findByRole("button", { name: ru.day.createDayType }));
+
+    // return= несёт сам день: без него возврат высаживал бы пользователя на
+    // пустой календарь вместо дня, ради которого он уходил за типом.
+    expect(screen.getByTestId("location").textContent).toBe(
+      `/settings/day-types?new=1&return=${encodeURIComponent("/?day=2026-08-10")}`,
+    );
+  });
+
+  it("открывает шторку сразу, когда адрес несёт ?day=", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+
+    expect(await screen.findByRole("button", { name: ru.day.close })).toBeInTheDocument();
+  });
+
+  it("игнорирует ?day= неизвестного вида: адрес приходит извне", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=не-дата");
+    await ready();
+
+    expect(screen.queryByRole("button", { name: ru.day.close })).toBeNull();
   });
 });
