@@ -55,7 +55,7 @@ but every computed number is explainable on screen.
 | Period naming | By the month the period ends in. Invertible by a setting |
 | Day entry | Duration in hours is primary. Start and end times are optional per day type |
 | Day types | Fully user-defined. No hardcoded types with special behaviour |
-| Rates | Multiplier and absolute rate are linked. A lock detaches a type from the base rate |
+| Rates | Multiplier and absolute rate are independent fields. A lock detaches a type from the base rate |
 | Weekends and holidays | Multiplier is pre-filled, visible on the day screen, editable in one tap |
 | Jobs | One. The column exists in the schema, never surfaced in the UI |
 | Auth | Email and password, plus Google OAuth |
@@ -210,26 +210,42 @@ is absent too, `settings.default_hours` applies.
 **Housekeeping**
 - `sort_order`, `is_archived`
 
-#### 5.3.1 Linking multiplier and rate
+#### 5.3.1 The rate lock
 
 The form shows two adjacent fields, **Multiplier** and **Rate, zł/h**, plus a lock toggle labelled
 "independent of the base rate".
 
+The two fields are **independent**. Typing into one never rewrites the other. Which of them is used
+is decided by `rate_mode`, never by whether a field happens to hold a value.
+
 Lock open (`rate_mode = multiplier`), the default:
 
-- typing a multiplier recomputes the rate as `base_rate × multiplier`
-- typing a rate recomputes the multiplier as `rate ÷ base_rate`; `rate_mode` stays `multiplier`
-- when the period base rate changes, the type's effective rate follows; the multiplier is preserved
+- the type's rate is the base rate of whichever period is on screen; the multiplier applies on top
+  of it when the day's amount is computed, per 6.4
+- the form shows a read-only preview of the result — "at a base of 30 zł/h that is 45 zł/h an hour"
+- when the period base rate changes, the effective rate follows; the multiplier is preserved
+- a number left in the rate field is kept but not used; reopening the lock does not silently detach
+  the type from the base rate
 
 Lock closed (`rate_mode = pinned`):
 
 - the rate field is authoritative and stored in `pinned_rate`
-- the multiplier is shown greyed out for reference, computed on display as
-  `pinned_rate ÷ base_rate` of the period currently on screen
+- **no multiplier is applied at all**, per 6.2 — neither the type's own nor the weekend or holiday
+  one. A pinned rate is already the finished number
 - changes to the period base rate have no effect on this type
 
 Closing the lock is a deliberate act, never a side effect of typing into the rate field. People often
 type a rate they know by heart without meaning to detach it from the base.
+
+**An earlier version of this section derived one field from the other**: a typed multiplier rewrote
+the rate as `base_rate × multiplier`, and a typed rate rewrote the multiplier as `rate ÷ base_rate`.
+That was the model removed from the day screen in commit `4cc25c5`, which moved the multiplier out
+of the rate (see 6.3 and 6.4) — the two documents described two different models at once. The
+derivation is unsound under the current formula: both fields end up carrying the same factor and
+`amount = hours × rate × multiplier` applies it twice. A hand-typed 50 zł/h at a base of 30
+recomputed 400.00 zł into 666.80 zł, and repairing entries already stored that way needed a
+dedicated Dexie migration. The read-only preview shows the user the same number without storing a
+derived value.
 
 **A day type's rate is always displayed in the context of a period.** The form carries a header line
 such as "August 2026, base 30 zł/h". Without it, an absolute number inside a global object is
@@ -262,8 +278,15 @@ A fact about a date. Multiple entries per date are allowed.
   recalculation
 - `amount` — computed amount in grosze
 - `amount_override` — when present, overrides everything
-- `rate_source` — `type_multiplier` | `type_pinned` | `holiday` | `sunday` | `saturday` | `manual` |
-  `frozen`. Drives the breakdown screen and makes bugs diagnosable
+- `rate_source` — describes how the **rate** was produced, not the multiplier. Since `4cc25c5` split
+  the two, a new entry only ever gets `period_base` (the rate is the period's base rate),
+  `type_pinned` (the day type's own rate, `rate_mode = pinned`), `manual` (typed by the user) or
+  `frozen` (fixed by the system when a base rate was applied from a date, 6.6). The values
+  `weekend_rule`, `holiday_rule` and `day_type_default` explained the rate under the old model and
+  still exist in entries written before that commit; the breakdown screen must keep rendering them,
+  but nothing writes them any more. What a weekend, holiday or day type contributed is the
+  *multiplier*, and its source is shown next to the multiplier field. Drives the breakdown screen
+  and makes bugs diagnosable
 
 **Other**
 - `note`
@@ -271,6 +294,24 @@ A fact about a date. Multiple entries per date are allowed.
 **Snapshot principle.** An entry stores every number its calculation needed. Once saved it is
 self-contained. A day type may be edited, archived or re-priced afterwards; existing entries are never
 affected. Only cosmetics — name, colour, badge — are read from the type at render time.
+
+### 5.4.1 Accepted deviations of the implementation from this section
+
+Recorded rather than repaired. Each was a deliberate decision; changing any of them now would touch
+the calculation layer and every stored row, for no gain the user can see.
+
+- **Money is floating point, duration is decimal hours.** Invariants 16 and 17 call for integer
+  grosze and whole minutes. The code stores `number` for money and a decimal `hours` on the entry,
+  rounding to the grosz once on the daily amount (18) and to two decimals on stored values. The
+  totals reconcile exactly, which is what 19 actually protects.
+- **Field names.** `day_types` stores `default_multiplier` for 5.3's `multiplier`, `default_rate`
+  for `pinned_rate`, and `ignore_auto_multipliers` for the inverse of `allow_auto_multipliers`. The
+  UI wording follows this document ("allow"); only the stored key is inverted. `rate_mode` decides
+  whether `default_rate` is used — a value left in the field does not by itself pin the type.
+- **Day type default times are not implemented.** 5.3's `default_start`, `default_end`,
+  `default_break_minutes` and `default_duration_minutes` do not exist; `default_hours` covers the
+  working path. 6.1's derivation of duration from start and end (and invariants 28 and 30) is not
+  implemented either, so a default time on a type would drive nothing. Deferred together with it.
 
 ### 5.5 `holidays`
 
@@ -657,7 +698,7 @@ error boundary panel, deployment through Workers Builds.
 
 **Block 3 — periods and rates.** Period creation by copying, the rate change dialog, closing a period.
 
-**Block 4 — day types.** The full editor, the multiplier and rate link, the lock, archiving.
+**Block 4 — day types.** The full editor, the multiplier and rate fields, the lock, archiving.
 
 **Block 5 — holidays and automatic multipliers.**
 

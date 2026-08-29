@@ -66,11 +66,17 @@ export function DayTypesPage() {
     () => (periodStartDay === undefined ? null : periodForDate(new Date(), periodStartDay)),
     [periodStartDay],
   );
+  // ?? null — потому что useLiveQuery отдаёт undefined и пока читает, и когда
+  // строки нет, а для формы это разные вещи: «периода нет» рисует подсказку
+  // инварианта 22 вместо предпросмотра ставки. Без различения форма на кадр
+  // показывала подсказку «базовая ставка не задана» и подменяла её
+  // предпросмотром — скачок вёрстки ровно там, где пользователь читает число.
   const period = useLiveQuery(
-    () =>
+    async () =>
       current
-        ? db.periods.where("[user_id+year+month]").equals([userId, current.year, current.month]).first()
-        : undefined,
+        ? ((await db.periods.where("[user_id+year+month]").equals([userId, current.year, current.month]).first()) ??
+          null)
+        : null,
     [current],
   );
 
@@ -182,7 +188,7 @@ export function DayTypesPage() {
     void reorderDayTypes(db, [...next, ...archived].map((dt) => dt.id));
   }
 
-  if (!settings || !current || dayTypes === undefined) {
+  if (!settings || !current || dayTypes === undefined || period === undefined) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-app-bg text-white/50">{ru.calendar.loading}</div>
     );
@@ -224,7 +230,7 @@ export function DayTypesPage() {
           // в форме состояние предыдущего черновика.
           key={editing?.id ?? "new"}
           initial={editing ? toDraft(editing) : emptyDayTypeDraft()}
-          baseRate={period ? period.base_rate : null}
+          baseRate={period === null ? null : period.base_rate}
           periodLabel={periodLabel}
           currency={settings.currency}
           onSave={(draft) => void handleSave(draft)}

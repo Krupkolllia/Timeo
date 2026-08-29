@@ -240,6 +240,19 @@ describe("DayTypesPage — форма", () => {
     expect(screen.getByLabelText(ru.dayTypes.rate)).toHaveValue("0");
   });
 
+  it("не показывает подсказку об отсутствии базовой ставки, пока период ещё читается", async () => {
+    // useLiveQuery отдаёт undefined и пока читает, и когда строки нет. Без
+    // различения форма на кадр показывала подсказку инварианта 22, а потом
+    // подменяла её предпросмотром — скачок вёрстки на самом читаемом месте.
+    await seed({ dayTypes: [], period: { base_rate: 30 } });
+
+    renderPage("/settings/day-types?new=1");
+
+    expect(screen.queryByText(ru.dayTypes.hintNoBaseRate)).toBeNull();
+    await screen.findByLabelText(ru.dayTypes.multiplier);
+    expect(screen.queryByText(ru.dayTypes.hintNoBaseRate)).toBeNull();
+  });
+
   it("замок закрывается только переключателем, а не вводом в поле ставки (раздел 5.3.1)", async () => {
     await seed({ dayTypes: [], period: { base_rate: 30 } });
 
