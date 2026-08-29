@@ -32,7 +32,7 @@ const EMPTY_HOLIDAYS: ReadonlyMap<string, Holiday> = new Map();
 
 export function CalendarPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewed, setViewed] = useState<PeriodId | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   // ?day= открывает шторку сразу: экран типов дня (раздел 8.2 — плюс в ряду
@@ -44,6 +44,21 @@ export function CalendarPage() {
     const day = searchParams.get("day");
     return day !== null && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
   });
+  // ?day= живёт в адресной строке только до этого момента: как только шторка
+  // открыта, адрес заменяется на голый "/" (replace, без новой записи).
+  // Иначе запись "/?day=…" остаётся лежать в истории под тем экраном, куда
+  // пользователь ушёл дальше (например, на итоги периода), и кнопка «назад»
+  // там (useBackTo → navigate(-1)) впоследствии вела бы не на календарь, а
+  // обратно на шторку случайного дня — того, что открывался последним через
+  // типы дня или праздники в этой сессии.
+  useEffect(() => {
+    if (searchParams.get("day") !== null) {
+      setSearchParams({}, { replace: true });
+    }
+    // Только на монтирование: адрес разбирается один раз, вместе с
+    // openDayDate выше.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Плашка "отменить" живёт на уровне календаря, а не внутри bottom sheet:
   // удаление записи закрывает экран дня сразу, и окно отмены (раздел 8 ТЗ)
   // должно пережить это закрытие, а не исчезать вместе с диалогом.
@@ -263,7 +278,12 @@ export function CalendarPage() {
         ))}
       </div>
 
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-32">
+      {/* pt-1 повторяет gap-1 между строк сверху: у праздничной ячейки в первой
+          строке ring-1 (раздел 8.1) рисуется за пределами её border box, а
+          сам скроллер раньше начинался без отступа — ровно на границе своей
+          области клиппинга, — и обводка обрезалась на паре пикселей на любом
+          месяце, чья первая неделя содержит праздник. */}
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-32">
         {weeks.map((week) => (
           <div key={toISODate(week[0])} className="grid grid-cols-7 gap-1">
             {week.map((date) => {

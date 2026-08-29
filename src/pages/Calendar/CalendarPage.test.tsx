@@ -6,6 +6,7 @@ import { CalendarPage } from "@/pages/Calendar/CalendarPage";
 import { PRESET_DAY_TYPES } from "@/db/dayTypes";
 import { ru } from "@/i18n/ru";
 import { makeDayType, makeEntry, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
+import { useBackTo } from "@/app/useBackTo";
 
 vi.mock("@/db/localUser", () => ({ getLocalUserId: () => "user-test" }));
 
@@ -16,13 +17,25 @@ function LocationProbe() {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 }
 
-function renderCalendar(initialEntry = "/") {
+/** Заглушка итогов периода: несёт кнопку «назад» на тех же правилах, что и настоящий экран. */
+function PeriodSummaryStub() {
+  const goBack = useBackTo("/");
+  return (
+    <>
+      <p>итоги периода</p>
+      <button onClick={goBack}>назад</button>
+    </>
+  );
+}
+
+function renderCalendar(initialEntry: string | string[] = "/") {
+  const entries = Array.isArray(initialEntry) ? initialEntry : [initialEntry];
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter initialEntries={entries}>
       <LocationProbe />
       <Routes>
         <Route path="/" element={<CalendarPage />} />
-        <Route path="/period" element={<p>итоги периода</p>} />
+        <Route path="/period" element={<PeriodSummaryStub />} />
         <Route path="/settings/day-types" element={<p>типы дней</p>} />
         <Route path="/settings/holidays" element={<p>праздники</p>} />
       </Routes>
@@ -123,6 +136,18 @@ describe("CalendarPage — сетка", () => {
     renderCalendar();
     await ready();
     expect(screen.getByText(/^v\d+\.\d+\.\d+/)).toBeInTheDocument();
+  });
+
+  it("даёт скроллеру верхний отступ, равный зазору между строк недель", async () => {
+    // Часть бага 1, проверяемая без вёрстки: у скроллера должен быть тот же
+    // отступ сверху, что и gap-1 между строками, иначе праздничная ячейка в
+    // первой неделе (ring-1) обрезается его границей клиппинга — сам факт
+    // клиппинга виден только в браузере (390×844), см. ручную проверку в отчёте.
+    renderCalendar();
+    await ready();
+
+    const scroller = dayCell("2026-08-01").closest(".overflow-y-auto");
+    expect(scroller?.className).toMatch(/\bpt-1\b/);
   });
 });
 
@@ -441,6 +466,41 @@ describe("CalendarPage — вход в создание типа дня (раз�
     renderCalendar("/?day=не-дата");
     await ready();
 
+    expect(screen.queryByRole("button", { name: ru.day.close })).toBeNull();
+  });
+
+  it("убирает ?day= из адреса, открыв шторку, — иначе запись остаётся в истории", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+    await screen.findByRole("button", { name: ru.day.close });
+
+    expect(screen.getByTestId("location").textContent).toBe("/");
+  });
+
+  it("«назад» с итогов периода не открывает шторку дня, оставшуюся в истории от типов/праздников", async () => {
+    // Баг: тапнули «+» в ряду типов на дне 10.08, вернулись на /?day=2026-08-10,
+    // затем открыли итоги периода и нажали «назад». Без снятия ?day= (тест
+    // выше) эта запись остаётся под итогами периода, и «назад» (navigate(-1),
+    // см. useBackTo) выносит не на пустой календарь, а обратно на шторку того
+    // самого дня.
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+    await screen.findByRole("button", { name: ru.day.close });
+
+    fireEvent.click(screen.getByRole("button", { name: ru.period.openSummary }));
+    await screen.findByText("итоги периода");
+
+    fireEvent.click(screen.getByRole("button", { name: "назад" }));
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/"));
     expect(screen.queryByRole("button", { name: ru.day.close })).toBeNull();
   });
 });
