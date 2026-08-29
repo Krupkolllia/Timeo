@@ -49,6 +49,11 @@ export function CalendarPage() {
   // должно пережить это закрытие, а не исчезать вместе с диалогом.
   const [pendingUndo, setPendingUndo] = useState<Entry | null>(null);
   const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Закрытие шторки, каким его понимает сам экран дня: с вопросом о
+  // несохранённых правках (раздел 8.2). Затемнение вокруг панели принадлежит
+  // календарю, и без этого тап по нему выбрасывал набранную смену молча — в
+  // отличие от кнопки «Закрыть» рядом.
+  const requestCloseDayRef = useRef<(() => void) | null>(null);
 
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
 
@@ -385,7 +390,7 @@ export function CalendarPage() {
           // «Закрыть» целиком: нажатие уходило в панель и вместо закрытия
           // открывало расшифровку периода.
           className="day-sheet-overlay fixed inset-0 z-30 flex items-end bg-black/50"
-          onClick={() => setOpenDayDate(null)}
+          onClick={() => (requestCloseDayRef.current ? requestCloseDayRef.current() : setOpenDayDate(null))}
         >
           {/* Лимит высоты (85dvh) и анимация появления живут в .day-sheet — на
               всей панели, а не на внутреннем скроллере DayScreen: ручка, дата
@@ -399,6 +404,7 @@ export function CalendarPage() {
               dayTypes={dayTypes}
               period={period}
               settings={settings}
+              requestCloseRef={requestCloseDayRef}
               onClose={() => setOpenDayDate(null)}
               onEntryDeleted={handleEntryDeleted}
               onOpenPeriod={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}

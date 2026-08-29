@@ -291,6 +291,44 @@ describe("CalendarPage — шторка дня", () => {
   });
 });
 
+describe("CalendarPage — закрытие дня тапом по затемнению (раздел 8.2)", () => {
+  it("тап мимо шторки с несохранёнными правками спрашивает, а не выбрасывает их", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    fireEvent.change(screen.getByLabelText(ru.day.hours), { target: { value: "6" } });
+    fireEvent.click(document.querySelector(".day-sheet-overlay")!);
+
+    // Для пользователя это то же действие, что кнопка «Закрыть», и вести себя
+    // оно обязано так же — иначе смена исчезает от касания мимо панели.
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    expect(screen.getByLabelText(ru.day.hours)).toBeInTheDocument();
+    expect((await db.entries.get("e-1"))?.hours).toBe(8);
+  });
+
+  it("без правок тап мимо шторки просто закрывает день", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    await db.entries.add(makeEntry({ id: "e-1" }));
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    fireEvent.click(document.querySelector(".day-sheet-overlay")!);
+
+    await waitFor(() => expect(screen.queryByLabelText(ru.day.hours)).not.toBeInTheDocument());
+    expect(screen.queryByText(ru.day.unsavedTitle)).not.toBeInTheDocument();
+  });
+});
+
 describe("CalendarPage — отмена удаления (раздел 9)", () => {
   beforeEach(async () => {
     await db.settings.add(makeSettings());
@@ -441,6 +479,8 @@ describe("CalendarPage — ?day= в чужом периоде (инвариан�
     await ready();
 
     fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+    // Раздел 8.2: запись уходит в базу только по кнопке.
+    fireEvent.click(screen.getByRole("button", { name: ru.day.save }));
 
     await waitFor(async () => {
       const rows = await db.entries.toArray();

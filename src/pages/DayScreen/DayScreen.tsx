@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
 import { NumberInput } from "@/components/NumberInput";
@@ -32,6 +32,14 @@ interface DayScreenProps {
   // закрытие листа уносило бы с собой единственную кнопку отмены (раздел 8 ТЗ
   // требует настоящее окно отмены, а не "пока открыт диалог").
   onEntryDeleted: (entry: Entry) => void;
+  /**
+   * Сюда экран кладёт собственный обработчик закрытия — тот же, что у кнопки
+   * «Закрыть», вместе с вопросом о несохранённом. Нужен календарю: затемнение
+   * вокруг шторки принадлежит ему, и тап по нему закрывал день напрямую, минуя
+   * вопрос. Для пользователя это то же самое действие, и вести себя оно обязано
+   * так же, иначе набранная смена исчезает от случайного касания мимо панели.
+   */
+  requestCloseRef?: MutableRefObject<(() => void) | null>;
   // Раздел 8.2: последним в ряду типов стоит плюс, ведущий прямо в создание
   // типа дня — «типы чаще всего нужны в тот момент, когда нужного нет».
   onCreateDayType: () => void;
@@ -74,6 +82,29 @@ function entryToDraft(entry: Entry): EntryDraft {
     break_minutes: entry.break_minutes,
     rate_source: entry.rate_source,
   };
+}
+
+/**
+ * Черновик совпадает с тем, что уже лежит в базе? От этого зависит, есть ли
+ * что сохранять и надо ли спрашивать при закрытии. Сравниваем значения, а не
+ * держим флаг «трогали поле»: набрать 8, стереть и снова набрать 8 — это не
+ * изменение, и спрашивать тут не о чем.
+ */
+function draftsEqual(a: EntryDraft, b: EntryDraft): boolean {
+  return (
+    a.day_type_id === b.day_type_id &&
+    a.hours === b.hours &&
+    a.multiplier === b.multiplier &&
+    a.rate_per_hour === b.rate_per_hour &&
+    a.rate_is_manual === b.rate_is_manual &&
+    a.amount === b.amount &&
+    a.amount_override === b.amount_override &&
+    a.note === b.note &&
+    a.start_time === b.start_time &&
+    a.end_time === b.end_time &&
+    a.break_minutes === b.break_minutes &&
+    a.rate_source === b.rate_source
+  );
 }
 
 function draftFromDefaults(dayTypeId: string, defaults: EntryDefaults): EntryDraft {
@@ -134,6 +165,7 @@ export function DayScreen({
   settings,
   onClose,
   onEntryDeleted,
+  requestCloseRef,
   onOpenPeriod,
   onCreateDayType,
   onOpenHolidays,
@@ -188,27 +220,55 @@ export function DayScreen({
 
   const [draft, setDraft] = useState<EntryDraft | null>(null);
 
-  // Синхронный "замок" на создание записи: без него быстрый двойной тап по
-  // двум кнопкам типа дня успевает вызвать persist() дважды до того, как первый
-  // createEntry() резолвится и useLiveQuery увидит новую запись — оба вызова
-  // видят entry === undefined и оба создают строку, задваивая запись за день.
-  const entryIdRef = useRef<string | null>(entry?.id ?? null);
-  const creatingRef = useRef<Promise<Entry | null> | null>(null);
+  // Раздел 8.2 (решение заказчика): запись уходит в базу только по кнопке
+  // «Сохранить». Отсюда три вещи, которых при мгновенной записи не требовалось:
+  //
+  //  - «начатая, но ещё не существующая запись» — состояние, в котором день
+  //    выбран, поля заполнены, а строки в Dexie нет вовсе;
+  //  - «есть что сохранять» — сравнение черновика с тем, что лежит в базе;
+  //  - вопрос при закрытии, потому что впервые в приложении появилась
+  //    возможность потерять набранное.
+  //
+  // Синхронный замок на запись: кнопку «Сохранить» успевают нажать дважды
+  // раньше, чем createEntry резолвится, и день получил бы две одинаковые
+  // строки. Тот же приём, что на экранах праздников и прошлых периодов.
+  const savingRef = useRef<Promise<boolean> | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  // Поколение черновика. «Добавить запись» начинает новую строку, и всё, что
-  // относилось к предыдущей, обязано перестать на неё влиять: уже отправленный
-  // createEntry не должен присвоить свой id новому черновику, а эффект
-  // синхронизации ниже — вернуть id старой записи.
-  const draftGenerationRef = useRef(0);
+  // Пользователь коснулся черновика хоть раз за это открытие дня. Нужно
+  // только для ещё не созданной записи: сравнивать её не с чем, а закрытие
+  // сразу после открытия дня не должно ни спрашивать, ни сохранять пустой день.
+  const [touched, setTouched] = useState(false);
 
-  useEffect(() => {
-    // Пока создание записи в полёте, entry всё ещё показывает прежний состав
-    // дня. Возврат сюда его id уводил бы следующую правку в чужую строку:
-    // после «Добавить запись» выбранной снова становится entries[0], и
-    // набранное для новой записи затирало бы первую запись дня без отмены.
-    if (creatingRef.current) return;
-    entryIdRef.current = entry?.id ?? null;
-  }, [entry?.id]);
+  /**
+   * Черновик описывает НОВУЮ строку, которой в базе ещё нет.
+   *
+   * Отличать это от правки существующей записи по «entry === undefined» нельзя:
+   * сразу после «Добавить запись» выбранной снова становится первая запись дня,
+   * и черновик сравнивался бы с ней. Если новая строка случайно совпала с ней
+   * значениями (а по умолчанию так и есть), экран решал, что сохранять нечего,
+   * и кнопки не было вовсе — вторую запись за день стало невозможно завести.
+   */
+  const [creatingNew, setCreatingNew] = useState(false);
+
+  /**
+   * Состояние строки, каким оно записано в базе, — точка отсчёта для «есть что
+   * сохранять». Держим его отдельно, а не читаем запись из Dexie: useLiveQuery
+   * привозит собственную запись экрана с задержкой в кадр-другой, и сразу
+   * после сохранения сравнение шло бы с УСТАРЕВШЕЙ строкой. Кнопка на этот
+   * кадр снова становилась «Сохранить», проверка успевала кликнуть по ней
+   * второй раз, и тесты падали через раз в зависимости от того, кто успел
+   * первым.
+   *
+   * null — строки в базе ещё нет, и точки отсчёта не существует: для такой
+   * записи признаком «есть что сохранять» служит сам факт правки (touched).
+   */
+  const [baseline, setBaseline] = useState<EntryDraft | null>(null);
+
+  // Отложенное действие, которое ждёт ответа на вопрос о несохранённом.
+  // Функция в состоянии — только через обёртку: useState вызывает переданную
+  // функцию как ленивый инициализатор.
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
 
   // Tracks whether the user has typed something into this screen visit before
   // switching day types. Untouched, a type tap should apply that type's own
@@ -218,18 +278,13 @@ export function DayScreen({
   const hasEditedRef = useRef(false);
 
   // Какой записи соответствует текущий черновик (null — записи ещё нет).
-  // Отдельный ref, а не entryIdRef: тот синхронизируется эффектом выше, который
-  // объявлен раньше и успевает отработать первым — проверка стала бы всегда истинной.
   const draftEntryIdRef = useRef<string | null>(null);
 
-  // Флаг «пользователь уже вводил значения» живёт на время посещения дня, а не
-  // строки в базе: первый же ввод создаёт запись и меняет entry.id, и общий
-  // эффект инициализации сбрасывал бы флаг ровно тогда, когда вводить начали.
   useEffect(() => {
     hasEditedRef.current = false;
     draftEntryIdRef.current = null;
-    draftGenerationRef.current += 1;
-    creatingRef.current = null;
+    setTouched(false);
+    setCreatingNew(false);
     setSelectedEntryId(null);
   }, [date]);
 
@@ -238,21 +293,24 @@ export function DayScreen({
   // собственная запись экрана эхом прилетала бы обратно и перетирала то, что
   // пользователь только что набирает в поле.
   useEffect(() => {
-    // Создание записи в полёте: черновик уже содержит то, что пользователь
-    // ввёл, а entries на этот момент ещё показывает прежний состав дня.
-    if (creatingRef.current) return;
     // Черновик уже соответствует этой записи — повторная инициализация затёрла
     // бы то, что пользователь набирает прямо сейчас.
     if (entry && entry.id === draftEntryIdRef.current) return;
-    // Запись создана, её id уже у нас, но useLiveQuery ещё не привёз её в
-    // список: entry на этот кадр undefined. Без этой проверки эффект уходил в
-    // ветку «записи нет» и сбрасывал черновик на значения ПЕРВОГО типа дня —
-    // только что выбранная ночная смена превращалась обратно в обычный день,
-    // а следующая же правка дописывала эти значения в созданную строку.
+    // Запись создана нашим же сохранением, её id уже у нас, но useLiveQuery ещё
+    // не привёз её в список: entry на этот кадр undefined. Без этой проверки
+    // эффект уходил в ветку «записи нет» и сбрасывал черновик на значения
+    // ПЕРВОГО типа дня — только что выбранная ночная смена превращалась
+    // обратно в обычный день.
     if (!entry && draftEntryIdRef.current !== null) return;
+    // Начатая, но ещё не сохранённая запись: строки в базе нет, и подставлять
+    // сюда значения по умолчанию значит стереть набранное человеком.
+    if (!entry && touched) return;
+    if (creatingNew) return;
 
     if (entry) {
       setDraft(entryToDraft(entry));
+      setBaseline(entryToDraft(entry));
+      setTouched(false);
     } else if (activeDayTypes.length > 0) {
       const defaults = buildEntryDefaultsForDayType(
         parsedDate,
@@ -262,8 +320,13 @@ export function DayScreen({
         settings.weekend_multipliers,
       );
       setDraft(draftFromDefaults(activeDayTypes[0].id, defaults));
+      // Значения по умолчанию — ещё не введённые данные: открыть день и тут же
+      // закрыть не должно ни спрашивать, ни сохранять пустую смену.
+      setBaseline(null);
+      setTouched(false);
     } else {
       setDraft(null);
+      setBaseline(null);
     }
     draftEntryIdRef.current = entry?.id ?? null;
     // holiday участвует в значениях по умолчанию (раздел 6.2), а приезжает из
@@ -271,57 +334,104 @@ export function DayScreen({
     // зависимостях предзаполненный множитель на праздник оставался бы правилом
     // выходного или типа дня до первого тапа по кнопке типа.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, date, selectedEntryId, holiday?.id]);
+  }, [entry?.id, date, selectedEntryId, holiday?.id, touched, creatingNew]);
 
   const dayType = draft ? dayTypeById.get(draft.day_type_id) : undefined;
 
-  async function persist(next: EntryDraft) {
+  /**
+   * Правка черновика. В базу здесь не уходит ничего: запись создаётся или
+   * обновляется только в handleSave (решение заказчика по разделу 8.2).
+   */
+  function applyDraft(next: EntryDraft) {
     setDraft(next);
-    // Поколение фиксируем до первого await: пока идёт запись в Dexie,
-    // пользователь успевает нажать «Добавить запись», и продолжение этого
-    // вызова относится уже к прошлой строке.
-    const generation = draftGenerationRef.current;
-
-    if (entryIdRef.current) {
-      await updateEntry(db, entryIdRef.current, next);
-      return;
-    }
-
-    if (creatingRef.current) {
-      // Создание уже в полёте (предыдущий вызов persist ещё не резолвился) —
-      // дожидаемся его и обновляем ту же строку вместо второй вставки.
-      const created = await creatingRef.current;
-      if (!created || generation !== draftGenerationRef.current) return;
-      entryIdRef.current = created.id;
-      draftEntryIdRef.current = created.id;
-      await updateEntry(db, created.id, next);
-      return;
-    }
-
-    const promise = createEntry(db, { ...next, user_id: userId, date });
-    creatingRef.current = promise;
-    const created = await promise;
-    // Черновик успел смениться на новую строку — этот результат к ней не
-    // относится, и присваивать его id значило бы направить следующую правку
-    // в уже созданную запись. creatingRef при этом не трогаем: он принадлежит
-    // новому поколению.
-    if (generation !== draftGenerationRef.current) return;
-    creatingRef.current = null;
-    // null — период закрыли, пока запись создавалась, и слой данных отказал
-    // (инвариант 2). Возвращать черновик не нужно: useLiveQuery уже везёт
-    // закрытый период, и шторка через кадр перерисуется в режим чтения.
-    if (!created) return;
-    entryIdRef.current = created.id;
-    draftEntryIdRef.current = created.id;
-    // Только что созданная запись становится выбранной: иначе на дне с
-    // несколькими записями экран продолжил бы показывать первую.
-    setSelectedEntryId(created.id);
+    setTouched(true);
   }
+
+  // Есть ли что сохранять. Для существующей записи — расхождение с тем, что
+  // лежит в базе; для ещё не созданной — сам факт, что человек её начал.
+  const isDirty = draft !== null && (baseline ? !draftsEqual(draft, baseline) : touched);
+
+  async function handleSave(): Promise<boolean> {
+    if (!draft) return false;
+    // Запись уже идёт — ждём её, а не отказываем. Отказ здесь стоил дорого:
+    // нажав «Сохранить» и сразу «Закрыть», человек получал вопрос о
+    // несохранённом, отвечал «сохранить изменения», а закрытие молча не
+    // происходило вовсе — второй вызов упирался в замок и возвращал false.
+    if (savingRef.current) return savingRef.current;
+
+    const run = async (): Promise<boolean> => {
+      // Цель записи — не только entry из useLiveQuery: собственная только что
+      // созданная строка приезжает оттуда с задержкой в кадр-другой, и всё это
+      // время entry === undefined. Без draftEntryIdRef второе сохранение
+      // (сохранил, тут же поправил, сохранил снова) уходило бы в ветку
+      // создания и заводило ВТОРУЮ запись за день.
+      const targetId = creatingNew ? null : (entry?.id ?? draftEntryIdRef.current);
+      if (targetId) {
+        await updateEntry(db, targetId, draft);
+        draftEntryIdRef.current = targetId;
+        setBaseline(draft);
+        setTouched(false);
+        return true;
+      }
+      const created = await createEntry(db, { ...draft, user_id: userId, date });
+      // null — период закрыли, пока экран был открыт, и слой данных отказал
+      // (инвариант 2). Шторка через кадр перерисуется в режим чтения.
+      if (!created) return false;
+      draftEntryIdRef.current = created.id;
+      // Только что созданная запись становится выбранной: иначе на дне с
+      // несколькими записями экран продолжил бы показывать первую.
+      setSelectedEntryId(created.id);
+      setCreatingNew(false);
+      setBaseline(draft);
+      setTouched(false);
+      return true;
+    };
+
+    const promise = run();
+    savingRef.current = promise;
+    setSaving(true);
+    try {
+      return await promise;
+    } finally {
+      savingRef.current = null;
+      setSaving(false);
+    }
+  }
+
+  /**
+   * Действие, которое уничтожит черновик (закрыть шторку, начать новую запись,
+   * переключиться на другую запись дня). Пока в приложении не было кнопки
+   * сохранения, терять было нечего; теперь — есть, поэтому спрашиваем.
+   *
+   * Это третье и последнее модальное окно в приложении. Инвариант 56 разрешал
+   * два (переоткрытие периода и замена данных при импорте); отступление
+   * согласовано с заказчиком вместе с самой кнопкой и записано в SPEC.md
+   * (раздел 8.2), потому что молчаливая потеря набранной смены на телефоне,
+   * который тестируют по скриншотам, обнаруживается через недели.
+   */
+  function guardDraft(action: () => void) {
+    if (!isDirty) {
+      action();
+      return;
+    }
+    setPendingDiscard(() => action);
+  }
+
+  // Публикуем закрытие наружу на каждый рендер: обработчик замыкает черновик и
+  // isDirty, а они меняются с каждым нажатием клавиши. Сохранённый один раз, он
+  // отвечал бы на вопрос «есть что сохранять» состоянием на момент открытия дня.
+  useEffect(() => {
+    if (!requestCloseRef) return;
+    requestCloseRef.current = () => guardDraft(onClose);
+    return () => {
+      requestCloseRef.current = null;
+    };
+  });
 
   function handleSelectDayType(dt: DayType) {
     if (!hasEditedRef.current) {
       const defaults = buildEntryDefaultsForDayType(parsedDate, dt, period, holiday, settings.weekend_multipliers);
-      void persist(draftFromDefaults(dt.id, defaults));
+      applyDraft(draftFromDefaults(dt.id, defaults));
       return;
     }
     // The user already typed hours/multiplier/rate for this day before tapping
@@ -353,20 +463,20 @@ export function DayScreen({
         rate_source: defaults.rate_source,
       };
       const recomputed = calculateEntryAmount(switched, dt, period);
-      void persist({ ...switched, amount: recomputed.amount, rate_per_hour: recomputed.rate_per_hour });
+      applyDraft({ ...switched, amount: recomputed.amount, rate_per_hour: recomputed.rate_per_hour });
       return;
     }
 
     const next = { ...draft, day_type_id: dt.id };
     const { amount, rate_per_hour } = calculateEntryAmount(next, dt, period);
-    void persist({ ...next, amount, rate_per_hour });
+    applyDraft({ ...next, amount, rate_per_hour });
   }
 
   function handleHoursChange(hours: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
     const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, hours }, dayType, period);
-    void persist({ ...draft, hours, amount, rate_per_hour });
+    applyDraft({ ...draft, hours, amount, rate_per_hour });
   }
 
   // Правила правки множителя и ставки живут в lib/calc/entry: они уже ломались
@@ -374,55 +484,54 @@ export function DayScreen({
   function handleMultiplierChange(multiplier: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    void persist({ ...draft, ...applyMultiplierEdit(draft, multiplier, dayType, period) });
+    applyDraft({ ...draft, ...applyMultiplierEdit(draft, multiplier, dayType, period) });
   }
 
   function handleRateChange(rate: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    void persist({ ...draft, ...applyRateEdit(draft, rate, dayType, period) });
+    applyDraft({ ...draft, ...applyRateEdit(draft, rate, dayType, period) });
   }
 
   function handleNoteChange(note: string) {
     if (!draft) return;
     hasEditedRef.current = true;
-    void persist({ ...draft, note });
+    applyDraft({ ...draft, note });
   }
 
   function handleToggleManualAmount(enabled: boolean) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
     if (enabled) {
-      void persist({ ...draft, amount_override: draft.amount });
+      applyDraft({ ...draft, amount_override: draft.amount });
       return;
     }
     const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, amount_override: null }, dayType, period);
-    void persist({ ...draft, amount_override: null, amount, rate_per_hour });
+    applyDraft({ ...draft, amount_override: null, amount, rate_per_hour });
   }
 
   function handleAmountOverrideChange(value: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
     const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, amount_override: value }, dayType, period);
-    void persist({ ...draft, amount_override: value, amount, rate_per_hour });
+    applyDraft({ ...draft, amount_override: value, amount, rate_per_hour });
   }
 
   function handleShiftTimeChange(patch: Partial<Pick<EntryDraft, "start_time" | "end_time" | "break_minutes">>) {
     if (!draft) return;
     hasEditedRef.current = true;
-    void persist({ ...draft, ...patch });
+    applyDraft({ ...draft, ...patch });
   }
 
-  function handleAddEntry() {
+  function startNewEntry() {
     if (activeDayTypes.length === 0) return;
     // Новая строка, а не правка текущей: сбрасываем и выбранную запись, и
-    // ссылки, по которым persist решает, обновлять или вставлять.
+    // ссылку, по которой черновик связан с записью в базе.
     setSelectedEntryId(null);
-    entryIdRef.current = null;
-    creatingRef.current = null;
     draftEntryIdRef.current = null;
     hasEditedRef.current = false;
-    draftGenerationRef.current += 1;
+    setCreatingNew(true);
+    setBaseline(null);
     const defaults = buildEntryDefaultsForDayType(
       parsedDate,
       activeDayTypes[0],
@@ -430,7 +539,20 @@ export function DayScreen({
       holiday,
       settings.weekend_multipliers,
     );
-    void persist(draftFromDefaults(activeDayTypes[0].id, defaults));
+    applyDraft(draftFromDefaults(activeDayTypes[0].id, defaults));
+  }
+
+  // «Добавить запись» бросает текущий черновик так же, как закрытие шторки,
+  // поэтому проходит через тот же вопрос.
+  function handleAddEntry() {
+    guardDraft(startNewEntry);
+  }
+
+  function handleSelectEntry(id: string) {
+    guardDraft(() => {
+      setCreatingNew(false);
+      setSelectedEntryId(id);
+    });
   }
 
   async function handleDelete() {
@@ -442,9 +564,10 @@ export function DayScreen({
     // Шторку закрываем только если день опустел: удаление одной из нескольких
     // записей не должно выкидывать пользователя из дня.
     const remaining = (entries ?? []).filter((e) => e.id !== deleted.id);
-    entryIdRef.current = null;
     draftEntryIdRef.current = null;
-    draftGenerationRef.current += 1;
+    setTouched(false);
+    setCreatingNew(false);
+    setBaseline(null);
     if (remaining.length === 0) {
       onClose();
       return;
@@ -557,7 +680,7 @@ export function DayScreen({
           {entries.map((e, index) => (
             <button
               key={e.id}
-              onClick={() => setSelectedEntryId(e.id)}
+              onClick={() => handleSelectEntry(e.id)}
               className={`min-h-11 shrink-0 rounded-lg px-3 text-sm ${
                 e.id === entry?.id ? "bg-white/15 text-white" : "bg-white/5 text-white/60"
               }`}
@@ -862,7 +985,10 @@ export function DayScreen({
             <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleAddEntry}>
               {ru.day.addEntry}
             </button>
-            {entry && (
+            {/* Только для строки, которая уже есть в базе: у начатой новой
+                записи удалять нечего, а entry в этот момент показывает первую
+                запись дня — кнопка удалила бы чужую. */}
+            {entry && !creatingNew && (
               <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
                 {ru.day.deleteEntry}
               </button>
@@ -871,9 +997,71 @@ export function DayScreen({
         </>
       )}
 
-      <button className="rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20" onClick={onClose}>
+      {/* Основное действие ниже всех и во всю ширину (инвариант 59): именно им
+          заканчивается ввод смены. Неактивна, когда сохранять нечего, — это
+          видимое состояние, а не молчаливое бездействие. */}
+      <button
+        className="min-h-11 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80 disabled:opacity-40"
+        disabled={!isDirty || saving}
+        onClick={() => void handleSave()}
+      >
+        {isDirty ? ru.day.save : ru.day.saved}
+      </button>
+
+      <button
+        className="rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+        onClick={() => guardDraft(onClose)}
+      >
         {ru.day.close}
       </button>
+
+      {/* Раздел 8.2: единственное место в приложении, где набранное можно
+          потерять. Закрытие по фону — это «остаться», а не «выбросить»:
+          случайный тап мимо не должен стоить смены. */}
+      {pendingDiscard && (
+        <div
+          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+          onClick={() => setPendingDiscard(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 text-white"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-base font-semibold">{ru.day.unsavedTitle}</p>
+            <p className="mt-2 text-sm text-white/50">{ru.day.unsavedBody}</p>
+            <div className="mt-4 flex gap-3">
+              <button
+                className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+                onClick={() => {
+                  const action = pendingDiscard;
+                  setPendingDiscard(null);
+                  setTouched(false);
+                  // Черновик возвращаем к сохранённому состоянию строки: иначе
+                  // брошенные значения остались бы на экране записи, к которой
+                  // они не относятся.
+                  if (baseline) setDraft(baseline);
+                  setCreatingNew(false);
+                  action();
+                }}
+              >
+                {ru.day.unsavedDiscard}
+              </button>
+              <button
+                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                onClick={() => {
+                  const action = pendingDiscard;
+                  setPendingDiscard(null);
+                  void handleSave().then((ok) => {
+                    if (ok) action();
+                  });
+                }}
+              >
+                {ru.day.unsavedSave}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
