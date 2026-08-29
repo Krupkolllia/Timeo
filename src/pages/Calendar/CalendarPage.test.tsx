@@ -24,6 +24,7 @@ function renderCalendar(initialEntry = "/") {
         <Route path="/" element={<CalendarPage />} />
         <Route path="/period" element={<p>итоги периода</p>} />
         <Route path="/settings/day-types" element={<p>типы дней</p>} />
+        <Route path="/settings/holidays" element={<p>праздники</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -457,5 +458,127 @@ describe("CalendarPage — ?day= в чужом периоде (инвариан�
     fireEvent.click(await screen.findByText(ru.day.hintNoBaseRateAction));
 
     expect(screen.getByTestId("location").textContent).toBe("/period?year=2026&month=7");
+  });
+});
+
+describe("CalendarPage — праздники (раздел 8.1)", () => {
+  it("первый запуск засевает праздники, и они видны на сетке", async () => {
+    renderCalendar();
+    await ready();
+
+    // 15 августа — Успение Пресвятой Богородицы, польский государственный
+    // праздник. До блока 5 таблица holidays была пуста всегда.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: `${formatDayTitle("2026-08-15")}, Успение Пресвятой Богородицы`,
+          hidden: true,
+        }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("праздник отличается цветом и от будня, и от выходного", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    await db.holidays.add({
+      id: "h-1",
+      user_id: USER_ID,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: null,
+      // Понедельник: будень, чтобы цвет нельзя было спутать с правилом выходного.
+      date: "2026-08-10",
+      name: "День фирмы",
+      is_custom: true,
+    });
+
+    renderCalendar();
+    await ready();
+
+    const holidayCell = await screen.findByRole("button", {
+      name: `${formatDayTitle("2026-08-10")}, День фирмы`,
+      hidden: true,
+    });
+    expect(holidayCell.className).toContain("text-app-holiday");
+    // Суббота остаётся жёлтой, будень — белым: три состояния различимы.
+    // 22-е, а не 15-е: 15 августа — засеянный праздник, и его подпись другая.
+    expect(dayCell("2026-08-22").className).toContain("text-app-accent");
+    expect(dayCell("2026-08-11").className).toContain("text-white");
+  });
+
+  it("мягко удалённый праздник не красит ячейку (инвариант 38)", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    await db.holidays.add({
+      id: "h-gone",
+      user_id: USER_ID,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: "2026-02-01T00:00:00.000Z",
+      date: "2026-08-10",
+      name: "Удалённый",
+      is_custom: true,
+    });
+
+    renderCalendar();
+    await ready();
+
+    expect(dayCell("2026-08-10").className).not.toContain("text-app-holiday");
+  });
+
+  it("инвариант 53: из двух праздников на дате ячейка называет самый ранний", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    await db.holidays.bulkAdd([
+      {
+        id: "a-late",
+        user_id: USER_ID,
+        created_at: "2026-03-01T00:00:00.000Z",
+        updated_at: "2026-03-01T00:00:00.000Z",
+        deleted_at: null,
+        date: "2026-08-10",
+        name: "День фирмы",
+        is_custom: true,
+      },
+      {
+        id: "z-early",
+        user_id: USER_ID,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+        deleted_at: null,
+        date: "2026-08-10",
+        name: "Успение",
+        is_custom: false,
+      },
+    ]);
+
+    renderCalendar();
+    await ready();
+
+    expect(
+      await screen.findByRole("button", { name: `${formatDayTitle("2026-08-10")}, Успение`, hidden: true }),
+    ).toBeInTheDocument();
+  });
+
+  it("шторка дня уводит в праздники и возвращает обратно в тот же день", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar();
+    await ready();
+
+    fireEvent.click(dayCell("2026-08-10"));
+    fireEvent.click(await screen.findByText(ru.day.holidayRowNone));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(
+        `/settings/holidays?add=2026-08-10&return=${encodeURIComponent("/?day=2026-08-10")}`,
+      ),
+    );
   });
 });

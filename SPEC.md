@@ -146,6 +146,7 @@ One row per user.
 - `week_starts_on` — Monday
 - `reminder_enabled`, `reminder_time`
 - `preferred_rate_change_mode` — remembered answer to the rate change dialog
+- `seeded_holiday_years` — years whose Polish public holidays have already been seeded (5.5)
 - `schema_version`
 
 ### 5.2 `periods`
@@ -318,6 +319,22 @@ the calculation layer and every stored row, for no gain the user can see.
 - `date`, `name`, `is_custom`
 
 Polish public holidays are seeded and fully editable: delete what does not apply, add company days off.
+
+**Which years, and when.** The current year and the next, checked at every launch, so next January is
+never empty and the window rolls forward on its own. Past years are not seeded: by invariant 51 a
+holiday laid over an existing entry changes no stored number, so seeding backwards would add scrolling
+and nothing else.
+
+**Seeding is idempotent and atomic**, in one `rw` transaction over `settings` and `holidays` — the
+same reason the day type seeder has one: React StrictMode's double effect would otherwise duplicate
+every row. The unit of seeding is the *year*, recorded in `settings.seeded_holiday_years`. A year is
+never seeded twice, so a holiday the user deleted does not come back. "Already seeded" is deliberately
+not inferred from the presence of holiday rows: deletion is soft, but invariant 38 keeps deleted rows
+only until sync has propagated them, and after that the app would restore exactly what the user erased.
+
+The four movable holidays (Easter Sunday, Easter Monday, Pentecost = Easter + 49, Corpus Christi =
+Easter + 60) come from a pure computus in `lib/calc/easter.ts`; dates are built as local `YYYY-MM-DD`
+strings and never serialised through UTC (invariant 27).
 
 ### 5.6 `push_subscriptions`
 
@@ -567,7 +584,15 @@ Rules that must hold under every possible sequence of actions. Each one deserves
 51. Editing the holiday list never recalculates existing entries. It affects only the multiplier
     proposed for new ones.
 52. A holiday added to a date inside a closed period changes nothing there.
-53. Two holidays on the same date are allowed; the first by sort order supplies the multiplier.
+53. Two holidays on the same date are allowed. The multiplier and the name shown come from the
+    earliest by `created_at`, tie-broken by `id`.
+
+    Originally worded "the first by sort order". `holidays` has no `sort_order`, 8.6 offers no
+    reordering, and every holiday resolves to the same `weekend_multipliers.holiday`, so which row
+    wins decides only the displayed name — never an amount. A field only creation order could ever
+    fill would have bought that name and a migration. The two consumers disagreed until block 5
+    (the day sheet took Dexie's `.first()`, 6.7's planner built a map where the *last* row won);
+    both now call one pure function.
 
 ### 7.10 Interface
 
@@ -629,6 +654,12 @@ A specific period's base rate is edited on its own summary screen. Editing it in
 ambiguous which month is meant and would visually contradict period isolation even where the code
 respects it.
 
+**Deviation, block 5.** The three weekend/holiday multipliers ship on the holidays screen (8.6), not
+here. Nothing in the app could set them before block 7, and a holiday whose multiplier is fixed at 1
+changes no money at all: block 5 would have added a screen listing dates and nothing else. 8.6 is also
+where the user is already thinking about them. Block 7 links to that screen rather than duplicating
+the fields.
+
 ### 8.5 Day types
 
 A reorderable list, swipe to archive, with a collapsed Archive section beneath. Each row shows the
@@ -641,7 +672,15 @@ hourly pay, counted as work and toward norm.
 
 ### 8.6 Holidays
 
-Grouped by year. Add and delete.
+Grouped by year. Add and delete. Deletion is soft, with an undo bar.
+
+At the top, the three weekend and holiday multipliers from 8.4, with a line saying what they do *not*
+do: existing entries are never recalculated (invariant 51), only what is proposed for new ones.
+
+Reached from the day sheet, next to the multiplier: a holiday date shows its name and leads to the
+list; any other date offers to mark it, opening the add form with that date filled in. Both carry a
+`return` parameter back to the day, as the day type plus does. Nothing else navigates below
+`/settings` until block 7.
 
 ### 8.7 Past periods
 

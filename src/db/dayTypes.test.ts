@@ -14,7 +14,7 @@ import {
   updateDayType,
   type DayTypeDraft,
 } from "@/db/dayTypes";
-import type { Entry, Period } from "@/types/models";
+import type { Entry, Holiday, Period } from "@/types/models";
 
 let db: TimeoDB | undefined;
 
@@ -444,5 +444,88 @@ describe("countDayTypeChangeTargets / applyDayTypeChange (раздел 6.7)", ()
     await deleteDayType(database, dayType.id);
     expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: dayType.id })).toBe(0);
     expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: "нет-такого" })).toBe(0);
+  });
+});
+
+describe("раздел 6.7 на праздничных датах", () => {
+  async function seedHoliday(database: TimeoDB, patch: Partial<Holiday> = {}): Promise<void> {
+    await database.holidays.add({
+      id: "h-1",
+      user_id: USER,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: null,
+      date: "2026-08-10",
+      name: "День фирмы",
+      is_custom: true,
+      ...patch,
+    });
+  }
+
+  it("праздник даёт свой множитель при согласии на обновление", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    await seedHoliday(database);
+    const dayType = await createDayType(database, USER, draft());
+    // Запись создана до праздника и хранит собственный снимок (раздел 5.4).
+    const entry = await seedEntry(database, dayType.id);
+    await updateDayType(database, dayType.id, { default_hours: 7 });
+
+    const scope = { ...SCOPE, dayTypeId: dayType.id };
+    // Ветка праздника в resolveMultiplier достижима только теперь, когда
+    // праздники существуют: ×2.5 вместо ×1.
+    expect(await countDayTypeChangeTargets(database, USER, scope)).toBe(1);
+    expect(await applyDayTypeChange(database, USER, scope)).toBe(1);
+
+    const updated = await database.entries.get(entry.id);
+    expect(updated?.multiplier).toBe(2.5);
+    expect(updated?.amount).toBe(600);
+  });
+
+  it("мягко удалённый праздник не участвует (инвариант 38)", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    await seedHoliday(database, { deleted_at: "2026-02-01T00:00:00.000Z" });
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id);
+
+    expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: dayType.id })).toBe(0);
+  });
+
+  it("чужой праздник не участвует", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    await seedHoliday(database, { user_id: "user-2" });
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id);
+
+    expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: dayType.id })).toBe(0);
+  });
+
+  it("два праздника на дате дают один множитель, какой бы из них ни победил", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    // Именно поэтому инвариант 53 решает только показанное имя: множитель у
+    // всех праздников один и тот же (weekend_multipliers.holiday), и выбор
+    // строки не может изменить ни одной суммы. Сам выбор проверяют тесты
+    // buildHolidayByDate и экранов.
+    await seedHoliday(database, { id: "h-late", created_at: "2026-03-01T00:00:00.000Z" });
+    await seedHoliday(database, { id: "h-early", created_at: "2026-01-01T00:00:00.000Z", name: "Успение" });
+    const dayType = await createDayType(database, USER, draft());
+    const entry = await seedEntry(database, dayType.id);
+
+    const scope = { ...SCOPE, dayTypeId: dayType.id };
+    await applyDayTypeChange(database, USER, scope);
+    expect((await database.entries.get(entry.id))?.multiplier).toBe(2.5);
+  });
+
+  it("праздник вне границ периода не влияет на записи текущего (инвариант 1)", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    await seedHoliday(database, { date: "2026-07-10" });
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id);
+
+    expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: dayType.id })).toBe(0);
   });
 });

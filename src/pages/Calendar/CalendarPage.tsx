@@ -6,7 +6,7 @@ import { getLocalUserId } from "@/db/localUser";
 import { bootstrapUser } from "@/db/bootstrap";
 import { getOrCreatePeriod } from "@/db/periods";
 import { restoreEntry } from "@/db/entries";
-import type { Entry } from "@/types/models";
+import type { Entry, Holiday } from "@/types/models";
 import {
   calculatePeriodTotals,
   getAdjacentPeriod,
@@ -17,6 +17,7 @@ import {
   type PeriodId,
 } from "@/lib/calc/period";
 import { buildWeeks, toISODate } from "@/lib/calc/calendarGrid";
+import { buildHolidayByDate } from "@/lib/calc/holidays";
 import { roundHours, roundMoney } from "@/lib/calc/round";
 import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
@@ -24,6 +25,10 @@ import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
 
 const userId = getLocalUserId();
+
+// Стабильная ссылка: пустая карта, созданная на месте, меняла бы зависимость
+// каждый рендер.
+const EMPTY_HOLIDAYS: ReadonlyMap<string, Holiday> = new Map();
 
 export function CalendarPage() {
   const navigate = useNavigate();
@@ -105,6 +110,37 @@ export function CalendarPage() {
       .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
       .toArray();
   }, [range]);
+
+  // Раздел 8.1: «выходные и праздники визуально отличаются». Сетка шире
+  // периода — она дополняется днями соседних месяцев до целых недель, — и
+  // запрашивать праздники надо ровно по ней, иначе крайние ячейки красились бы
+  // непоследовательно.
+  const gridRange = useMemo(() => {
+    if (!range) return null;
+    const weeks = buildWeeks(range.start, range.end);
+    return { start: toISODate(weeks[0][0]), end: toISODate(weeks[weeks.length - 1][6]) };
+  }, [range]);
+
+  // Ответ несёт границы, для которых он получен: useLiveQuery СОХРАНЯЕТ прежний
+  // результат, пока перезапускается после смены зависимости, и на кадр после
+  // перелистывания месяца календарь красил бы праздники прошлого периода.
+  const holidayResult = useLiveQuery(async () => {
+    if (!gridRange) return null;
+    const rows = await db.holidays
+      .where("date")
+      .between(gridRange.start, gridRange.end, true, true)
+      .filter((holiday) => holiday.user_id === userId && holiday.deleted_at === null)
+      .toArray();
+    return { start: gridRange.start, end: gridRange.end, byDate: buildHolidayByDate(rows) };
+  }, [gridRange]);
+
+  const holidayByDate = useMemo(
+    () =>
+      gridRange && holidayResult && holidayResult.start === gridRange.start && holidayResult.end === gridRange.end
+        ? holidayResult.byDate
+        : EMPTY_HOLIDAYS,
+    [gridRange, holidayResult],
+  );
 
   // Предыдущий период — только для сравнения в панели итогов (раздел 7.1).
   // getOrCreatePeriod здесь намеренно не вызывается: он создаёт строку при
@@ -235,6 +271,7 @@ export function CalendarPage() {
               const dayEntries = entriesByDate.get(iso) ?? [];
               const dayHours = roundHours(dayEntries.reduce((sum, e) => sum + e.hours, 0));
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+              const holiday = holidayByDate.get(iso);
 
               return (
                 <button
@@ -242,12 +279,25 @@ export function CalendarPage() {
                   disabled={!inPeriod}
                   // Доступное имя ячейки — читаемая дата: в сетке два «31»
                   // (конец прошлого месяца и конец этого), и одно голое число
-                  // не отличает их ни для скринридера, ни для теста.
-                  aria-label={formatDayTitle(iso)}
+                  // не отличает их ни для скринридера, ни для теста. Праздник
+                  // добавляется сюда же: на экране он виден цветом, а цвет —
+                  // единственное, чего не существует ни для скринридера, ни
+                  // для теста.
+                  aria-label={holiday ? `${formatDayTitle(iso)}, ${holiday.name}` : formatDayTitle(iso)}
                   onClick={() => setOpenDayDate(iso)}
+                  // Раздел 8.1: праздник отличается и от будня, и от выходного.
+                  // Выходной — жёлтый текст, поэтому праздник берёт розовый плюс
+                  // обводку: воскресный праздник иначе неотличим от обычного
+                  // воскресенья, а именно в нём другой множитель.
                   className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-lg text-sm ${
                     inPeriod ? "bg-white/5 active:bg-white/10" : "opacity-20"
-                  } ${isWeekend && inPeriod ? "text-app-accent" : "text-white"}`}
+                  } ${holiday && inPeriod ? "ring-1 ring-app-holiday/50" : ""} ${
+                    holiday && inPeriod
+                      ? "text-app-holiday"
+                      : isWeekend && inPeriod
+                        ? "text-app-accent"
+                        : "text-white"
+                  }`}
                 >
                   <span>{date.getDate()}</span>
                   {/* Не больше трёх точек: ячейка 50px шириной, три точки по 6px
@@ -353,6 +403,13 @@ export function CalendarPage() {
               onOpenPeriod={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
               onCreateDayType={() =>
                 navigate(`/settings/day-types?new=1&return=${encodeURIComponent(`/?day=${openDayDate}`)}`)
+              }
+              // Раздел 8.6. return= возвращает ровно в тот день, ради которого
+              // пользователь ушёл, — тот же приём, что и у плюса типов дня.
+              onOpenHolidays={({ addDate }) =>
+                navigate(
+                  `/settings/holidays?${addDate ? `add=${addDate}&` : ""}return=${encodeURIComponent(`/?day=${openDayDate}`)}`,
+                )
               }
             />
           </div>
