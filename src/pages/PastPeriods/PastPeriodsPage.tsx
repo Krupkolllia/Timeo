@@ -178,14 +178,14 @@ export function PastPeriodsPage() {
   const warning = blockedClosed
     ? ru.pastPeriods.hintClosed
     : warnExisting
-    ? ru.pastPeriods.hintExisting
-    : warnFuture
-      ? ru.pastPeriods.hintFutureMonth
-      : warnNegativeAmount
-        ? ru.pastPeriods.hintNegativeAmount
-        : warnZeroHours
-          ? ru.pastPeriods.hintZeroHours
-          : null;
+      ? ru.pastPeriods.hintExisting
+      : warnFuture
+        ? ru.pastPeriods.hintFutureMonth
+        : warnNegativeAmount
+          ? ru.pastPeriods.hintNegativeAmount
+          : warnZeroHours
+            ? ru.pastPeriods.hintZeroHours
+            : null;
 
   return (
     // h-dvh + min-h-0 на скроллере: без ограниченной высоты скроллится документ
