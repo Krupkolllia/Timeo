@@ -168,6 +168,7 @@ describe("TimeoDB schema migration", () => {
       start_time: null,
       end_time: null,
       break_minutes: null,
+      duration_is_manual: false,
       note: "",
       rate_source: "period_base",
     });
@@ -731,6 +732,79 @@ describe("TimeoDB schema migration", () => {
     // который спрашивает settings.seeded_holiday_years.
     expect(await upgraded.holidays.count()).toBe(0);
 
+    upgraded.close();
+  });
+  it("version(8) помечает все существующие записи как duration_is_manual", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").bulkAdd([
+      legacyPeriod({
+        id: "p-closed",
+        year: 2026,
+        month: 7,
+        is_closed: true,
+        closed_totals: { amount: 240, total_hours: 8, norm_hours_covered: 8 },
+      }),
+      legacyPeriod({ id: "p-open", year: 2026, month: 8 }),
+    ]);
+    await legacy.table("day_types").add(legacyDayType());
+    await legacy.table("entries").bulkAdd([
+      // Ровно тот случай, ради которого миграция и ставит true: времена
+      // заполнены, а часы человек набрал сам. Вывод по разделу 6.1 дал бы
+      // 7.5 вместо 8 и переписал бы 240 zł в 225 zł при первом же сохранении.
+      legacyEntry({
+        id: "with-times",
+        date: "2026-08-10",
+        hours: 8,
+        amount: 240,
+        start_time: "08:00",
+        end_time: "16:00",
+        break_minutes: 30,
+      }),
+      legacyEntry({ id: "no-times", date: "2026-08-11", hours: 6, amount: 180 }),
+      legacyEntry({ id: "closed", date: "2026-07-10", hours: 8, amount: 240, start_time: "22:00", end_time: "06:00" }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entries = await upgraded.entries.toArray();
+    expect(entries).toHaveLength(3);
+    // Всем, включая запись закрытого периода: оставить поле неопределённым
+    // значило бы договориться о выводе длительности на случай переоткрытия.
+    for (const entry of entries) expect(entry.duration_is_manual).toBe(true);
+
+    // Ни одна сумма и ни одна длительность не изменились.
+    expect((await upgraded.entries.get("with-times"))?.hours).toBe(8);
+    expect((await upgraded.entries.get("with-times"))?.amount).toBe(240);
+    expect((await upgraded.entries.get("with-times"))?.start_time).toBe("08:00");
+    expect((await upgraded.entries.get("no-times"))?.amount).toBe(180);
+    expect((await upgraded.entries.get("closed"))?.amount).toBe(240);
+    expect(roundMoney(entries.reduce((sum, e) => sum + e.amount, 0))).toBe(660);
+
+    // updated_at не тронут — иначе для синхронизации блока 8 вся база разом
+    // выглядит изменённой.
+    for (const entry of entries) expect(entry.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    // Инвариант 2: закрытый период неизменяем.
+    const closedPeriod = await upgraded.periods.get("p-closed");
+    expect(closedPeriod?.is_closed).toBe(true);
+    expect(closedPeriod?.closed_totals).toEqual({ amount: 240, total_hours: 8, norm_hours_covered: 8 });
+    expect(closedPeriod?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("version(8) на пустой базе ничего не создаёт", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+    expect(await upgraded.entries.count()).toBe(0);
     upgraded.close();
   });
 });

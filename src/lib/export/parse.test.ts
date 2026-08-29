@@ -124,6 +124,28 @@ describe("parseBackup — приём", () => {
     expect(result.file.entries[0].multiplier).toBe(1.566666);
   });
 
+  it("запись без duration_is_manual читается как ручная (инвариант 50)", () => {
+    // Файл, записанный сборкой до раздела 6.1: времена в нём есть, но ни одно
+    // hours из них не выводилось. Значение false включило бы вывод, и первая
+    // же правка такого дня переписала бы настоящую сумму.
+    const legacy = { ...makeEntry({ hours: 8, amount: 240 }), start_time: "08:00", end_time: "16:00" };
+    delete (legacy as Record<string, unknown>).duration_is_manual;
+
+    const result = parse({ ...validFile(), entries: [legacy] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.file.entries[0].duration_is_manual).toBe(true);
+    expect(result.file.entries[0].hours).toBe(8);
+    expect(result.file.entries[0].amount).toBe(240);
+  });
+
+  it("явный duration_is_manual: false переживает разбор", () => {
+    const result = parse({ ...validFile(), entries: [makeEntry({ duration_is_manual: false })] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.file.entries[0].duration_is_manual).toBe(false);
+  });
+
   it("файл более старой версии: недостающие поля заполняются миграцией (инвариант 50)", () => {
     // Такой файл записала бы сборка до блока 4: у типа дня нет ни значка, ни
     // note, ни rate_mode, а ставка задана — значит замок закрыт.

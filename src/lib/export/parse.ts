@@ -231,6 +231,13 @@ function parseEntry(value: unknown, now: string): Entry | null {
     start_time: nullableStr(value.start_time),
     end_time: nullableStr(value.end_time),
     break_minutes: nullableNum(value.break_minutes),
+    // По умолчанию TRUE, а не false, и ровно по той же причине, что в
+    // миграции version(8): в файле, записанном версией до раздела 6.1, ни одно
+    // hours не выводилось из времён. Значение false включило бы вывод для
+    // импортированной записи с заполненными временами, и первая же правка дня
+    // переписала бы настоящую сумму. Инвариант 50 требует, чтобы старый
+    // экспорт читался позже, — читаться он обязан теми же числами.
+    duration_is_manual: bool(value.duration_is_manual, true),
     note: str(value.note, ""),
     rate_source: oneOf(value.rate_source, RATE_SOURCES, "period_base"),
   };
