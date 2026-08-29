@@ -81,6 +81,30 @@ function legacyEntry(patch: Record<string, unknown> = {}) {
 }
 
 
+function legacyDayType(patch: Record<string, unknown> = {}) {
+  return {
+    id: "dt-1",
+    user_id: "user-1",
+    created_at: "",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    deleted_at: null,
+    name: "Рабочий день",
+    color: "#38bdf8",
+    icon: "briefcase",
+    pay_mode: "hourly",
+    fixed_amount: null,
+    counts_as_work: true,
+    counts_toward_norm: true,
+    default_hours: 8,
+    default_multiplier: 1,
+    default_rate: null,
+    ignore_auto_multipliers: false,
+    sort_order: 0,
+    is_archived: false,
+    ...patch,
+  };
+}
+
 let dbName: string | undefined;
 
 afterEach(async () => {
@@ -488,6 +512,137 @@ describe("TimeoDB schema migration", () => {
     await upgraded.open();
 
     expect((await upgraded.entries.get("auto"))?.rate_per_hour).toBe(45);
+
+    upgraded.close();
+  });
+  it("derives a day type badge from its name when upgrading to v6", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("day_types").bulkAdd([
+      legacyDayType({ id: "work", name: "Рабочий день" }),
+      legacyDayType({ id: "night", name: "  ночная смена", sort_order: 1 }),
+      // Имя может быть пустым: раздел 9 запрещает жёсткую валидацию, и такой
+      // тип дня мог быть создан. Пустой значок на календаре — регрессия.
+      legacyDayType({ id: "nameless", name: "", sort_order: 2 }),
+      legacyDayType({ id: "emoji", name: "🌙 ночь", sort_order: 3 }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.day_types.get("work"))?.label).toBe("Р");
+    expect((await upgraded.day_types.get("night"))?.label).toBe("Н");
+    expect((await upgraded.day_types.get("nameless"))?.label).toBe("•");
+    expect((await upgraded.day_types.get("emoji"))?.label).toBe("🌙");
+    for (const id of ["work", "night", "nameless", "emoji"]) {
+      const row = await upgraded.day_types.get(id);
+      expect(row?.label).not.toBe("");
+      expect(row?.note).toBe("");
+      // updated_at не трогаем — иначе при синхронизации (блок 8) все типы дней
+      // разом уедут в облако как «изменённые».
+      expect(row?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+      expect((row as unknown as { icon?: string }).icon).toBeUndefined();
+    }
+
+    upgraded.close();
+  });
+
+  it("infers rate_mode from the old default_rate convention on upgrade to v6", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("day_types").bulkAdd([
+      legacyDayType({ id: "linked", default_rate: null }),
+      // До блока 4 «своя ставка» выражалась именно так, и режим обязан
+      // получиться тот же, каким он был вчера.
+      legacyDayType({ id: "pinned", default_rate: 55, sort_order: 1 }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.day_types.get("linked"))?.rate_mode).toBe("multiplier");
+    expect((await upgraded.day_types.get("pinned"))?.rate_mode).toBe("pinned");
+    expect((await upgraded.day_types.get("pinned"))?.default_rate).toBe(55);
+
+    upgraded.close();
+  });
+
+  it("changes no stored amount and no closed period when upgrading to v6", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    // Закрытый период плюс открытый: ни тот, ни другой миграция типов дней
+    // трогать не имеет права (инвариант 2 и раздел 5.4 — записи самодостаточны).
+    await legacy.table("periods").bulkAdd([
+      legacyPeriod({
+        id: "p-closed",
+        year: 2026,
+        month: 7,
+        base_rate: 30,
+        is_closed: true,
+        closed_totals: { amount: 240, total_hours: 8, norm_hours_covered: 8 },
+      }),
+      legacyPeriod({ id: "p-open", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+    await legacy.table("day_types").add(legacyDayType());
+    await legacy.table("entries").bulkAdd([
+      legacyEntry({ id: "closed", date: "2026-07-10", amount: 240 }),
+      legacyEntry({ id: "open-a", date: "2026-08-10", amount: 240 }),
+      legacyEntry({ id: "open-b", date: "2026-08-11", hours: 6, amount: 180 }),
+    ]);
+    legacy.close();
+
+    const before = { closed: 240, open: 420 };
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entries = await upgraded.entries.toArray();
+    const sumFor = (prefix: string) =>
+      roundMoney(entries.filter((e) => e.date.startsWith(prefix)).reduce((sum, e) => sum + e.amount, 0));
+    expect(sumFor("2026-07")).toBe(before.closed);
+    expect(sumFor("2026-08")).toBe(before.open);
+    for (const entry of entries) expect(entry.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    const closedPeriod = await upgraded.periods.get("p-closed");
+    expect(closedPeriod?.is_closed).toBe(true);
+    expect(closedPeriod?.closed_totals?.amount).toBe(240);
+    expect(closedPeriod?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("leaves a day type that already carries the v6 fields untouched", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("day_types").add(
+      legacyDayType({ id: "already", name: "Рабочий день", label: "☀", note: "своя заметка", rate_mode: "pinned" }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const row = await upgraded.day_types.get("already");
+    expect(row?.label).toBe("☀");
+    expect(row?.note).toBe("своя заметка");
+    // rate_mode задан явно и не должен переехать в "multiplier" из-за того,
+    // что default_rate ещё не заполнен.
+    expect(row?.rate_mode).toBe("pinned");
 
     upgraded.close();
   });

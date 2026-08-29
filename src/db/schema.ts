@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from "dexie";
 import type { Settings, Period, DayType, Entry, Holiday } from "@/types/models";
 import { roundHours, roundMoney, roundMultiplier } from "@/lib/calc/round";
 import { periodForDate } from "@/lib/calc/period";
+import { deriveDayTypeLabel } from "@/lib/format/dayType";
 
 export class TimeoDB extends Dexie {
   settings!: EntityTable<Settings, "id">;
@@ -146,5 +147,41 @@ export class TimeoDB extends Dexie {
           entry.rate_per_hour = baseRate;
         });
     });
+    // Блок 4 приводит day_types к разделу 5.3. Три поля:
+    //
+    //   label     — 1–3 символа для значка (раздел 8.2). Заменяет icon
+    //               ("briefcase", "moon", …), который не рисовался нигде.
+    //   note      — описание, видимое в выборе типа дня.
+    //   rate_mode — "multiplier" | "pinned" (раздел 5.3.1). Раньше режим
+    //               выводился из `default_rate !== null`; выводим ровно то же
+    //               самое, чтобы ни один существующий тип не начал вести себя
+    //               иначе, чем вёл вчера.
+    //
+    // label выводим из имени, а не оставляем пустым: пустой кружок на ячейке
+    // календаря — регрессия, а не нейтральное значение. Пользователь может
+    // поправить значок в форме сразу после обновления.
+    //
+    // Трогается ровно одна таблица. entries и periods здесь не открываются
+    // вовсе, поэтому ни одна сумма не может измениться (тип дня — это
+    // косметика на момент отрисовки плюс шаблон для БУДУЩИХ записей, раздел
+    // 5.4) и ни один закрытый период не может быть затронут (инвариант 2).
+    //
+    // updated_at, как и в version(3)/(4)/(5), намеренно не трогаем: иначе при
+    // появлении синхронизации (блок 8) все типы дней уедут в облако как
+    // «изменённые».
+    this.version(6).upgrade((tx) =>
+      tx
+        .table("day_types")
+        .toCollection()
+        .modify((dayType: DayType & { icon?: string }) => {
+          dayType.label = dayType.label || deriveDayTypeLabel(dayType.name ?? "");
+          dayType.note = dayType.note ?? "";
+          dayType.rate_mode =
+            dayType.rate_mode ?? (dayType.default_rate !== null && dayType.default_rate !== undefined
+              ? "pinned"
+              : "multiplier");
+          delete dayType.icon;
+        }),
+    );
   }
 }

@@ -9,6 +9,11 @@ import type { DayType, Entry } from "@/types/models";
 export function rateNote(entry: Pick<Entry, "amount_override" | "rate_source" | "rate_is_manual">): string | null {
   if (entry.amount_override !== null) return ru.period.amountOverridden;
   if (entry.rate_source === "frozen") return ru.period.rateSourceFrozen;
+  // Проверка обязана стоять ДО rate_is_manual: у записи типа с закрытым замком
+  // оба поля выставлены разом (rate_is_manual означает «ставка отвязана от
+  // базовой»), и «ставка вручную» на числе из шаблона — прямая неправда на том
+  // самом экране, который по разделу 9 обязан объяснять числа.
+  if (entry.rate_source === "type_pinned") return ru.period.rateSourcePinned;
   if (entry.rate_is_manual) return ru.period.rateSourceManual;
   return null;
 }

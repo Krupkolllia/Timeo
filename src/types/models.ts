@@ -65,17 +65,45 @@ export interface Period extends BaseRecord {
 
 export type PayMode = "hourly" | "fixed_amount" | "unpaid";
 
+/**
+ * Раздел 5.3.1 ТЗ. Замок «независимо от базовой ставки»: открыт — ставка типа
+ * дня выводится из базовой ставки периода, закрыт — у типа своя ставка,
+ * лежащая в default_rate.
+ *
+ * До блока 4 этого поля не было и режим выводился из `default_rate !== null`.
+ * Правило работало, но было невидимым: раздел 6.2 («если rate_mode = pinned,
+ * множитель не применяется») опирается именно на него, и без явного поля
+ * различие нельзя ни задать, ни показать.
+ */
+export type RateMode = "multiplier" | "pinned";
+
 export interface DayType extends BaseRecord {
   name: string;
   color: string;
-  icon: string;
+  /**
+   * Раздел 5.3: 1–3 символа для значка. Заменило поле icon ("briefcase",
+   * "moon", …), которое не рисовалось нигде: раздел 8.2 требует цветной кружок
+   * с символами, а не набор иконок.
+   */
+  label: string;
+  /** Раздел 5.3: свободное описание, видно в выборе типа дня. */
+  note: string;
   pay_mode: PayMode;
+  rate_mode: RateMode;
   fixed_amount: number | null;
   counts_as_work: boolean;
   counts_toward_norm: boolean;
   default_hours: number;
   default_multiplier: number;
+  /**
+   * Раздел 5.3 называет это поле pinned_rate. Имя оставлено прежним осознанно:
+   * переименование ключа в живой базе не даёт пользователю ничего, а миграция
+   * блока 4 обязана доказывать, что не изменила ни одной суммы. Смысл при этом
+   * изменился и это главное: значение читается, только когда
+   * rate_mode = "pinned", а не «как только оно не null».
+   */
   default_rate: number | null;
+  /** Раздел 5.3 называет это поле allow_auto_multipliers; здесь оно обратное. */
   ignore_auto_multipliers: boolean;
   sort_order: number;
   is_archived: boolean;
@@ -86,6 +114,10 @@ export type RateSource =
   | "weekend_rule"
   | "holiday_rule"
   | "day_type_default"
+  // Раздел 6.3: у типа дня закрыт замок, ставка взята из его default_rate.
+  // Отличается от "manual" происхождением: число не вписывал человек на экране
+  // дня, оно пришло из шаблона (инвариант 15).
+  | "type_pinned"
   | "manual"
   // Раздел 6.6: ставка заморожена системой при смене базовой ставки «с даты».
   // Отличается от "manual" (пользователь вписал число сам) только

@@ -31,6 +31,9 @@ interface DayScreenProps {
   // закрытие листа уносило бы с собой единственную кнопку отмены (раздел 8 ТЗ
   // требует настоящее окно отмены, а не "пока открыт диалог").
   onEntryDeleted: (entry: Entry) => void;
+  // Раздел 8.2: последним в ряду типов стоит плюс, ведущий прямо в создание
+  // типа дня — «типы чаще всего нужны в тот момент, когда нужного нет».
+  onCreateDayType: () => void;
 }
 
 // Форма записи, которой оперирует экран. Совпадает с редактируемыми полями Entry,
@@ -108,6 +111,11 @@ function multiplierSourceLabel(source: MultiplierResult["source"]): string | nul
     case "day_type_ignore":
     case "day_type_default":
       return ru.day.multiplierSourceDayType;
+    // Раздел 6.2: у типа с закрытым замком множитель не применяется вовсе, и
+    // молча показать «×1» без причины значит оставить пользователя гадать,
+    // почему воскресный множитель не сработал.
+    case "pinned":
+      return ru.day.multiplierSourcePinned;
     case "default":
       return null;
   }
@@ -122,9 +130,17 @@ export function DayScreen({
   onClose,
   onEntryDeleted,
   onOpenPeriod,
+  onCreateDayType,
 }: DayScreenProps) {
   const activeDayTypes = useMemo(
-    () => [...dayTypes].filter((dt) => !dt.is_archived).sort((a, b) => a.sort_order - b.sort_order),
+    // deleted_at === null — инвариант 38: мягко удалённые строки не участвуют
+    // ни в одной выборке. Архивные скрыты по инварианту 11: они исчезают из
+    // выбора, но продолжают рисоваться на старых записях, поэтому dayTypeById
+    // ниже строится по полному списку.
+    () =>
+      [...dayTypes]
+        .filter((dt) => !dt.is_archived && dt.deleted_at === null)
+        .sort((a, b) => a.sort_order - b.sort_order),
     [dayTypes],
   );
   const dayTypeById = useMemo(() => new Map(dayTypes.map((dt) => [dt.id, dt])), [dayTypes]);
@@ -300,6 +316,35 @@ export function DayScreen({
     // another type — keep those instead of overwriting them with the new
     // type's defaults, only day_type_id and the pay_mode-dependent amount change.
     if (!draft) return;
+
+    // Исключение — замок (раздел 5.3.1). «Своя ставка» и «ставка периода» это
+    // не пользовательский ввод, а правило самого типа дня, и перенести старые
+    // деньги через эту границу нельзя ни в одну сторону:
+    //
+    //  - переход НА pinned-тип сохранял бы базовую ставку и множитель выходного
+    //    вместо собственной ставки типа: 6ч × 30 × 2 = 360 там, где тип дня
+    //    объявил 55 zł/h и раздел 6.2 запрещает множитель вовсе;
+    //  - переход С pinned-типа оставлял бы его 55 zł/h на записи как ручную
+    //    ставку, и она пережила бы даже смену базовой ставки периода.
+    //
+    // Часы, заметка, времена и ручная сумма при этом остаются пользовательскими:
+    // именно ради них эта ветка и существует.
+    const previous = dayTypeById.get(draft.day_type_id);
+    if (dt.rate_mode === "pinned" || previous?.rate_mode === "pinned") {
+      const defaults = buildEntryDefaultsForDayType(parsedDate, dt, period, holiday, settings.weekend_multipliers);
+      const switched = {
+        ...draft,
+        day_type_id: dt.id,
+        multiplier: defaults.multiplier,
+        rate_per_hour: defaults.rate_per_hour,
+        rate_is_manual: defaults.rate_is_manual,
+        rate_source: defaults.rate_source,
+      };
+      const recomputed = calculateEntryAmount(switched, dt, period);
+      void persist({ ...switched, amount: recomputed.amount, rate_per_hour: recomputed.rate_per_hour });
+      return;
+    }
+
     const next = { ...draft, day_type_id: dt.id };
     const { amount, rate_per_hour } = calculateEntryAmount(next, dt, period);
     void persist({ ...next, amount, rate_per_hour });
@@ -504,24 +549,64 @@ export function DayScreen({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2">
-        {activeDayTypes.length === 0 && <p className="col-span-3 text-sm text-white/50">{ru.day.noDayTypes}</p>}
+      {/* Раздел 8.2: горизонтальный ряд крупных кружков, по одному на тип дня,
+          окрашенных его цветом, со значком внутри. Ряд, а не сетка: типов
+          бывает десяток, и сетка из имён занимала бы треть шторки. shrink-0 на
+          элементах обязателен — иначе flex сжимает кружки в овалы вместо того,
+          чтобы включить прокрутку. */}
+      {/* shrink-0 на самом ряду обязателен: шторка ограничена 85dvh, и как
+          flex-элемент колонки ряд сжимался до 4px — кружки превращались в
+          полоски 56×24, а кнопки получали нулевую высоту. Самый нужный
+          элемент экрана оказывался невидимым ровно тогда, когда полей в
+          шторке много. */}
+      <div className="-mx-4 flex shrink-0 gap-3 overflow-x-auto px-4 pb-1">
+        {activeDayTypes.length === 0 && <p className="text-sm text-white/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
           const isSelected = draft?.day_type_id === dt.id;
           return (
             <button
               key={dt.id}
               onClick={() => handleSelectDayType(dt)}
-              className={`rounded-xl px-2 py-3 text-sm font-medium ${
-                isSelected ? "text-slate-900" : "bg-white/5 text-white active:bg-white/10"
-              }`}
-              style={isSelected ? { backgroundColor: dt.color } : undefined}
+              aria-pressed={isSelected}
+              className="flex w-16 shrink-0 flex-col items-center gap-1"
             >
-              {dt.name}
+              {/* aria-hidden: значок дублирует имя, стоящее рядом, и без этого
+                  доступное имя кнопки превращается в «Н Ночная смена». */}
+              <span
+                aria-hidden
+                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-semibold text-slate-900 ${
+                  isSelected ? "ring-2 ring-white" : ""
+                }`}
+                style={{ backgroundColor: dt.color }}
+              >
+                {dt.label}
+              </span>
+              {/* Имя под кружком: значок из 1–3 символов сам по себе опознаётся
+                  не всегда, а «Отпуск» и «Отгул» дают одну и ту же букву. */}
+              <span className={`w-full truncate text-center text-[11px] ${isSelected ? "text-white" : "text-white/50"}`}>
+                {dt.name}
+              </span>
             </button>
           );
         })}
+        <button
+          onClick={onCreateDayType}
+          aria-label={ru.day.createDayType}
+          className="flex w-16 shrink-0 flex-col items-center gap-1"
+        >
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-dashed border-white/30 text-xl text-white/60">
+            +
+          </span>
+          <span className="w-full truncate text-center text-[11px] text-white/50">{ru.day.createDayTypeShort}</span>
+        </button>
       </div>
+
+      {/* Раздел 5.3: заметка типа дня «видна при выборе типа». Отдельной
+          строкой под рядом, а не подписью под кружком (в колонке 64px не
+          помещается) и не атрибутом title: на телефоне тултипа не существует,
+          и поле молча не делало бы ничего. Высота зарезервирована — иначе
+          выбор типа с заметкой сдвигал бы вниз всю шторку. */}
+      <p className="-mt-2 min-h-[1rem] shrink-0 truncate text-xs text-white/40">{dayType?.note ?? ""}</p>
 
       {draft && dayType && (
         <>

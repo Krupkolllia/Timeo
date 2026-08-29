@@ -16,13 +16,14 @@ function LocationProbe() {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 }
 
-function renderCalendar() {
+function renderCalendar(initialEntry = "/") {
   render(
-    <MemoryRouter initialEntries={["/"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <LocationProbe />
       <Routes>
         <Route path="/" element={<CalendarPage />} />
         <Route path="/period" element={<p>итоги периода</p>} />
+        <Route path="/settings/day-types" element={<p>типы дней</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -352,5 +353,109 @@ describe("CalendarPage — отмена удаления (раздел 9)", () =
     await vi.advanceTimersByTimeAsync(5000);
     await waitFor(() => expect(screen.queryByText(ru.day.deletedNotice)).not.toBeInTheDocument());
     expect((await db.entries.get("e-1"))?.deleted_at).not.toBeNull();
+  });
+});
+
+describe("CalendarPage — вход в создание типа дня (раздел 8.2)", () => {
+  it("плюс в ряду типов уводит в создание и запоминает день, куда вернуться", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+    renderCalendar();
+    await ready();
+
+    fireEvent.click(dayCell("2026-08-10"));
+    fireEvent.click(await screen.findByRole("button", { name: ru.day.createDayType }));
+
+    // return= несёт сам день: без него возврат высаживал бы пользователя на
+    // пустой календарь вместо дня, ради которого он уходил за типом.
+    expect(screen.getByTestId("location").textContent).toBe(
+      `/settings/day-types?new=1&return=${encodeURIComponent("/?day=2026-08-10")}`,
+    );
+  });
+
+  it("открывает шторку сразу, когда адрес несёт ?day=", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=2026-08-10");
+    await ready();
+
+    expect(await screen.findByRole("button", { name: ru.day.close })).toBeInTheDocument();
+  });
+
+  it("игнорирует ?day= неизвестного вида: адрес приходит извне", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.add(makePeriod());
+
+    renderCalendar("/?day=не-дата");
+    await ready();
+
+    expect(screen.queryByRole("button", { name: ru.day.close })).toBeNull();
+  });
+});
+
+describe("CalendarPage — ?day= в чужом периоде (инвариант 1)", () => {
+  it("показывает период открытого дня, а не сегодняшний", async () => {
+    // Сценарий раздела 8.2: пролистали календарь в июль, открыли 15 июля,
+    // тапнули «+» в ряду типов, создали тип и вернулись на /?day=2026-07-15.
+    // viewed при этом монтируется заново и без этой связи встаёт на сегодня.
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 25 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    expect(screen.getByText("Июль 2026")).toBeInTheDocument();
+  });
+
+  it("пишет запись по ставке ЕЁ периода, а не того, что открыт в календаре", async () => {
+    // Инвариант 1: одна операция правит записи не более чем одного периода.
+    // Июльская запись, посчитанная по августовской базовой ставке, — это
+    // молчаливое нарушение изоляции периодов ровно на том пути, ради которого
+    // вход через «+» и добавлен.
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 25 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+
+    await waitFor(async () => {
+      const rows = await db.entries.toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].date).toBe("2026-07-15");
+      expect(rows[0].rate_per_hour).toBe(25);
+      expect(rows[0].amount).toBe(200); // 8 × 25, а не 8 × 30
+    });
+  });
+
+  it("уводит на экран периода открытого дня, а не сегодняшнего", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 0 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+    // Базовая ставка июля равна нулю — в шторке появляется путь к её правке.
+    fireEvent.click(await screen.findByText(ru.day.hintNoBaseRateAction));
+
+    expect(screen.getByTestId("location").textContent).toBe("/period?year=2026&month=7");
   });
 });

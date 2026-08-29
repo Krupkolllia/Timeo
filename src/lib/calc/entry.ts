@@ -84,8 +84,19 @@ export function buildEntryDefaultsForDayType(
   weekendMultipliers: WeekendMultipliers,
 ): EntryDefaults {
   const multiplierResult = resolveMultiplier(date, dayType, holiday, weekendMultipliers);
-  const rate_is_manual = dayType.default_rate !== null;
-  const provisionalRate = rate_is_manual ? dayType.default_rate! : period.base_rate;
+  // Раздел 6.3: у типа с закрытым замком ставка берётся из его default_rate и
+  // не зависит от базовой ставки периода — то есть ровно то, что в модели
+  // записей выражается через rate_is_manual (инвариант 9: такая запись не
+  // пересчитывается автоматически при смене базовой ставки).
+  //
+  // Признак — именно rate_mode, а не «default_rate не null»: пользователь
+  // может открыть замок, оставив прежнее число в поле, и ставка обязана снова
+  // следовать за периодом. Пустое поле при закрытом замке даёт ноль, а не
+  // молчаливый откат к базовой ставке: раздел 9 запрещает блокировать ввод, но
+  // подменять незаполненное значение чужим — это не прозрачность.
+  const isPinned = dayType.rate_mode === "pinned";
+  const rate_is_manual = isPinned;
+  const provisionalRate = isPinned ? (dayType.default_rate ?? 0) : period.base_rate;
 
   const { amount, rate_per_hour } = calculateEntryAmount(
     {
@@ -105,7 +116,9 @@ export function buildEntryDefaultsForDayType(
     rate_per_hour,
     rate_is_manual,
     amount,
-    rate_source: mapRateSource(rate_is_manual),
+    // "type_pinned", а не "manual": число пришло из шаблона, а не с экрана дня,
+    // и инвариант 15 требует, чтобы поле описывало, как ставка реально получилась.
+    rate_source: isPinned ? "type_pinned" : mapRateSource(false),
     multiplier_source: multiplierResult.source,
   };
 }
