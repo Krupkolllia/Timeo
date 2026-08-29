@@ -226,6 +226,39 @@ describe("DayTypesPage — форма", () => {
     });
   });
 
+  it("не сохраняет пустой значок, если поле очистили вручную", async () => {
+    // Очистка backspace'ом ставит labelTouched=true при пустом draft.label —
+    // ветка вывода значка из имени в этот момент уже не работает, и пустой
+    // кружок уезжал бы в базу.
+    await seed({ dayTypes: [] });
+
+    renderPage("/settings/day-types?new=1");
+
+    fireEvent.change(await screen.findByLabelText(ru.dayTypes.name), { target: { value: "Ночная смена" } });
+    fireEvent.change(screen.getByLabelText(ru.dayTypes.label), { target: { value: "НС" } });
+    fireEvent.change(screen.getByLabelText(ru.dayTypes.label), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.dayTypes.save }));
+
+    await waitFor(async () => {
+      const rows = await db.day_types.where("user_id").equals(userId).toArray();
+      expect(rows[0].label).toBe("Н");
+    });
+  });
+
+  it("отличает pinned-тип без ставки от типа с нулевой ставкой", async () => {
+    await seed({
+      dayTypes: [
+        makeType({ id: "dt-unset", name: "Без ставки", rate_mode: "pinned", default_rate: null }),
+        makeType({ id: "dt-zero", name: "Нулевая", rate_mode: "pinned", default_rate: 0, sort_order: 1 }),
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText(`🔒 ${ru.dayTypes.noPinnedRateShort}`)).toBeInTheDocument();
+    expect(screen.getByText(/🔒 0\.00/)).toBeInTheDocument();
+  });
+
   it("показывает предпросмотр ставки, а не пересчитывает поля друг из друга (раздел 5.3.1)", async () => {
     await seed({ dayTypes: [], period: { base_rate: 30 } });
 

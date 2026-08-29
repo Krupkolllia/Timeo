@@ -429,7 +429,12 @@ function describeRate(dayType: DayType, baseRate: number | null, currency: strin
     return `${ru.dayTypes.payModeFixed}: ${(dayType.fixed_amount ?? 0).toFixed(2)} ${currency}`;
   }
   if (dayType.rate_mode === "pinned") {
-    return `🔒 ${(dayType.default_rate ?? 0).toFixed(2)} ${currency}/${ru.calendar.hoursShort}`;
+    // null и явно вписанный 0 — разные вещи: первое значит «ставку не задали»,
+    // второе «день не оплачивается по часам». Формат «0.00» сливал их в одну
+    // строку ровно там, куда пользователь пришёл бы разбираться, что с типом
+    // не так (инвариант 55).
+    if (dayType.default_rate === null) return `🔒 ${ru.dayTypes.noPinnedRateShort}`;
+    return `🔒 ${dayType.default_rate.toFixed(2)} ${currency}/${ru.calendar.hoursShort}`;
   }
   const multiplier = `×${dayType.default_multiplier}`;
   if (baseRate === null) return multiplier;

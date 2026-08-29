@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatEntryDetail, rateNote } from "@/lib/format/entry";
+import { ru } from "@/i18n/ru";
 import type { Entry } from "@/types/models";
 
 type Detail = Parameters<typeof formatEntryDetail>[0];
@@ -48,5 +49,24 @@ describe("formatEntryDetail", () => {
 
   it("тип дня мог быть удалён — формат не должен падать", () => {
     expect(formatEntryDetail(entry(), undefined)).toBe("8ч × 30.00 · ×1");
+  });
+});
+
+describe("rateNote — тип дня со своей ставкой", () => {
+  it("подписывает ставку как пришедшую из типа дня, а не вписанную рукой", () => {
+    // buildEntryDefaultsForDayType выставляет обоим полям значение разом:
+    // rate_is_manual означает «ставка отвязана от базовой», а откуда она
+    // взялась, говорит rate_source (инвариант 15).
+    const pinned = entry({ rate_is_manual: true, rate_source: "type_pinned", rate_per_hour: 55 });
+
+    expect(rateNote(pinned)).toBe(ru.period.rateSourcePinned);
+    expect(formatEntryDetail(pinned, "hourly")).toContain(ru.period.rateSourcePinned);
+  });
+
+  it("ручная сумма и заморозка по-прежнему побеждают", () => {
+    expect(rateNote(entry({ rate_is_manual: true, rate_source: "type_pinned", amount_override: 100 }))).toBe(
+      ru.period.amountOverridden,
+    );
+    expect(rateNote(entry({ rate_is_manual: true, rate_source: "frozen" }))).toBe(ru.period.rateSourceFrozen);
   });
 });

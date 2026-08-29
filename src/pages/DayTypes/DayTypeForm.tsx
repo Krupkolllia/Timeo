@@ -323,7 +323,11 @@ export function DayTypeForm({
         <button
           type="button"
           className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
-          onClick={() => onSave({ ...draft, label })}
+          // label || derive(...): поле значка можно очистить backspace'ом, и
+          // тогда labelTouched уже true, а draft.label пуст — без запасного
+          // значения форма молча сохраняла бы пустой кружок, ровно ту
+          // регрессию, которую version(6) чинила для старых данных.
+          onClick={() => onSave({ ...draft, label: label || deriveDayTypeLabel(draft.name) })}
         >
           {ru.dayTypes.save}
         </button>

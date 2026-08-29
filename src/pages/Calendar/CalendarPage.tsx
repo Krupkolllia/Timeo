@@ -52,11 +52,23 @@ export function CalendarPage() {
   }, []);
 
   // The period is computed from settings' period_start_day, so we wait for it to load.
+  //
+  // Отсчёт идёт от открытого дня, если он пришёл в адресе, и только иначе от
+  // сегодняшнего. Возврат из экрана типов дня на /?day= монтирует календарь
+  // заново: без этой связи openDayDate вставал на 15 июля, а viewed — на
+  // сегодняшний август, и шторка получала июльскую дату с августовским
+  // периодом. Дальше любая правка писала июльскую запись по августовской
+  // базовой ставке — молчаливое нарушение изоляции периодов (инвариант 1) на
+  // том самом пути, ради которого вход через «+» и добавлен.
   useEffect(() => {
     if (settings && viewed === null) {
-      setViewed(periodForDate(new Date(), settings.period_start_day));
+      // Дату разбираем вручную: new Date("2026-07-15") — это UTC-полночь
+      // (инвариант 27).
+      const [y, m, d] = openDayDate?.split("-").map(Number) ?? [];
+      const anchor = y && m && d ? new Date(y, m - 1, d) : new Date();
+      setViewed(periodForDate(anchor, settings.period_start_day));
     }
-  }, [settings, viewed]);
+  }, [settings, viewed, openDayDate]);
 
   const range = useMemo(
     () => (viewed && settings ? getPeriodDateRange(viewed.year, viewed.month, settings.period_start_day) : null),

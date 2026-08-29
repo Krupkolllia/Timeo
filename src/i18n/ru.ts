@@ -168,6 +168,8 @@ export const ru = {
     hintNoBaseRateAction: "Задать",
     hintPinnedNoMultiplier: "У типа своя ставка, поэтому множитель к нему не применяется",
     hintNoPinnedRate: "Ставка не задана — день посчитается по нулю",
+    // Та же мысль в одну строку — для списка типов, где нет места объяснению.
+    noPinnedRateShort: "ставка не задана",
     hintNegativeRate: "Ставка отрицательная — это точно верно?",
     hintNegativeMultiplier: "Множитель отрицательный — это точно верно?",
     hintFixedAmount: "Часы и ставка на сумму не влияют",
@@ -221,6 +223,9 @@ export const ru = {
     amountOverridden: "сумма вручную",
     payModeUnpaid: "не оплачивается",
     rateSourceManual: "ставка вручную",
+    // Отличается от rateSourceManual происхождением: число пришло из шаблона
+    // типа дня, а не с экрана дня (инвариант 15).
+    rateSourcePinned: "своя ставка типа дня",
     hintZeroBaseRate: "Базовая ставка равна нулю — часы будут считаться по нулю",
     hintNegativeExtra: "Сумма отрицательная — это точно верно?",
   },

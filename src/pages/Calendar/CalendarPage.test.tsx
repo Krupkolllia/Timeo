@@ -396,3 +396,66 @@ describe("CalendarPage — вход в создание типа дня (раз�
     expect(screen.queryByRole("button", { name: ru.day.close })).toBeNull();
   });
 });
+
+describe("CalendarPage — ?day= в чужом периоде (инвариант 1)", () => {
+  it("показывает период открытого дня, а не сегодняшний", async () => {
+    // Сценарий раздела 8.2: пролистали календарь в июль, открыли 15 июля,
+    // тапнули «+» в ряду типов, создали тип и вернулись на /?day=2026-07-15.
+    // viewed при этом монтируется заново и без этой связи встаёт на сегодня.
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 25 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    expect(screen.getByText("Июль 2026")).toBeInTheDocument();
+  });
+
+  it("пишет запись по ставке ЕЁ периода, а не того, что открыт в календаре", async () => {
+    // Инвариант 1: одна операция правит записи не более чем одного периода.
+    // Июльская запись, посчитанная по августовской базовой ставке, — это
+    // молчаливое нарушение изоляции периодов ровно на том пути, ради которого
+    // вход через «+» и добавлен.
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 25 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+
+    await waitFor(async () => {
+      const rows = await db.entries.toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].date).toBe("2026-07-15");
+      expect(rows[0].rate_per_hour).toBe(25);
+      expect(rows[0].amount).toBe(200); // 8 × 25, а не 8 × 30
+    });
+  });
+
+  it("уводит на экран периода открытого дня, а не сегодняшнего", async () => {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(hourly);
+    await db.periods.bulkAdd([
+      makePeriod({ id: "p-july", year: 2026, month: 7, base_rate: 0 }),
+      makePeriod({ id: "p-august", year: 2026, month: 8, base_rate: 30 }),
+    ]);
+
+    renderCalendar("/?day=2026-07-15");
+    await ready();
+
+    fireEvent.click(await screen.findByRole("button", { name: hourly.name }));
+    // Базовая ставка июля равна нулю — в шторке появляется путь к её правке.
+    fireEvent.click(await screen.findByText(ru.day.hintNoBaseRateAction));
+
+    expect(screen.getByTestId("location").textContent).toBe("/period?year=2026&month=7");
+  });
+});
