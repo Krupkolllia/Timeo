@@ -222,12 +222,13 @@ export function PeriodSummaryPage() {
         )}
 
         <div>
-          <label className="text-xs text-white/50">{ru.period.baseRate}</label>
+          <label className="text-xs text-white/50" htmlFor="period-base-rate">{ru.period.baseRate}</label>
           <div className="mt-1 flex items-center gap-2">
             {/* min-w-0 — иначе длинное число распирает flex-строку и выталкивает
                 валюту с кнопкой за край экрана (инвариант 26). */}
             <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-white/5 px-2">
               <NumberInput
+                id="period-base-rate"
                 disabled={isClosed}
                 className="min-w-0 flex-1 bg-transparent py-3 text-lg outline-none disabled:opacity-70"
                 value={rateValue}
@@ -255,8 +256,9 @@ export function PeriodSummaryPage() {
         </div>
 
         <div>
-          <label className="text-xs text-white/50">{ru.period.normHours}</label>
+          <label className="text-xs text-white/50" htmlFor="period-norm-hours">{ru.period.normHours}</label>
           <NumberInput
+            id="period-norm-hours"
             disabled={isClosed}
             className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg disabled:opacity-70"
             value={period.norm_hours}
@@ -265,9 +267,10 @@ export function PeriodSummaryPage() {
         </div>
 
         <div>
-          <label className="text-xs text-white/50">{ru.period.extraAmount}</label>
+          <label className="text-xs text-white/50" htmlFor="period-extra-amount">{ru.period.extraAmount}</label>
           <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
             <NumberInput
+              id="period-extra-amount"
               disabled={isClosed}
               className="min-w-0 flex-1 bg-transparent py-3 text-lg outline-none disabled:opacity-70"
               value={period.extra_amount}
