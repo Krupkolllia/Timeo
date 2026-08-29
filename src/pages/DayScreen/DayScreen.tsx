@@ -590,10 +590,12 @@ export function DayScreen({
    * resolveDuration возвращает вписанное человеком число.
    */
   function handleShiftTimeChange(patch: Partial<Pick<EntryDraft, "start_time" | "end_time" | "break_minutes">>) {
-    if (!draft) return;
+    // Та же охрана, что у остальных обработчиков: поля времени рисуются внутри
+    // {draft && dayType && …}, поэтому без типа дня сюда не попасть, а
+    // отдельная ветка «пересчитать нечем» была бы непроверяемой.
+    if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    const next = { ...draft, ...patch };
-    applyDraft(dayType ? withDerivedDuration(next, dayType) : next);
+    applyDraft(withDerivedDuration({ ...draft, ...patch }, dayType));
   }
 
   function startNewEntry() {
