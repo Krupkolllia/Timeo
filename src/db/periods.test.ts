@@ -273,6 +273,72 @@ describe("getOrCreatePeriod — пропуски в цепочке период�
     expect(june.base_rate).toBe(50);
   });
 
+  it("ручной период не служит образцом для копирования (раздел 8.7)", async () => {
+    const database = openDb();
+    // Исторический май, введённый руками: человек вписал итог за месяц, а
+    // базовой ставки у такого периода никогда не было — в строке лежит ноль.
+    await database.periods.add({
+      id: "p-manual",
+      user_id: USER,
+      created_at: "2026-05-01T00:00:00.000Z",
+      updated_at: "2026-05-01T00:00:00.000Z",
+      deleted_at: null,
+      year: 2026,
+      month: 5,
+      base_rate: 0,
+      norm_hours: 0,
+      extra_amount: 0,
+      extra_note: "",
+      is_closed: true,
+      closed_totals: { amount: 1500, total_hours: 100, norm_hours_covered: 100 },
+      is_manual: true,
+    });
+
+    const june = await getOrCreatePeriod(database, USER, 2026, 6, settings);
+
+    // Копирование нуля означало бы, что каждый июньский день молча считается
+    // по нулевой ставке.
+    expect(june.base_rate).toBe(25);
+    expect(june.norm_hours).toBe(168);
+  });
+
+  it("за ручным периодом видит обычный и копирует у него", async () => {
+    const database = openDb();
+    const april = await getOrCreatePeriod(database, USER, 2026, 4, settings);
+    await database.periods.update(april.id, { base_rate: 42, norm_hours: 150 });
+    await database.periods.add({
+      id: "p-manual",
+      user_id: USER,
+      created_at: "2026-05-01T00:00:00.000Z",
+      updated_at: "2026-05-01T00:00:00.000Z",
+      deleted_at: null,
+      year: 2026,
+      month: 5,
+      base_rate: 0,
+      norm_hours: 0,
+      extra_amount: 0,
+      extra_note: "",
+      is_closed: true,
+      closed_totals: { amount: 1500, total_hours: 100, norm_hours_covered: 100 },
+      is_manual: true,
+    });
+
+    const june = await getOrCreatePeriod(database, USER, 2026, 6, settings);
+
+    expect(june.base_rate).toBe(42);
+    expect(june.norm_hours).toBe(150);
+  });
+
+  it("мягко удалённый период не служит образцом и не занимает месяц (инвариант 38)", async () => {
+    const database = openDb();
+    const august = await getOrCreatePeriod(database, USER, 2026, 8, settings);
+    await database.periods.update(august.id, { base_rate: 42, deleted_at: "2026-08-20T00:00:00.000Z" });
+
+    const recreated = await getOrCreatePeriod(database, USER, 2026, 8, settings);
+    expect(recreated.id).not.toBe(august.id);
+    expect(recreated.base_rate).toBe(25);
+  });
+
   it("не берёт более поздний период за образец", async () => {
     const database = openDb();
     const october = await getOrCreatePeriod(database, USER, 2026, 10, settings);
