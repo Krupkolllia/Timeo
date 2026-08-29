@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/db/db";
 import { NumberInput } from "@/components/NumberInput";
@@ -32,6 +32,14 @@ interface DayScreenProps {
   // закрытие листа уносило бы с собой единственную кнопку отмены (раздел 8 ТЗ
   // требует настоящее окно отмены, а не "пока открыт диалог").
   onEntryDeleted: (entry: Entry) => void;
+  /**
+   * Сюда экран кладёт собственный обработчик закрытия — тот же, что у кнопки
+   * «Закрыть», вместе с вопросом о несохранённом. Нужен календарю: затемнение
+   * вокруг шторки принадлежит ему, и тап по нему закрывал день напрямую, минуя
+   * вопрос. Для пользователя это то же самое действие, и вести себя оно обязано
+   * так же, иначе набранная смена исчезает от случайного касания мимо панели.
+   */
+  requestCloseRef?: MutableRefObject<(() => void) | null>;
   // Раздел 8.2: последним в ряду типов стоит плюс, ведущий прямо в создание
   // типа дня — «типы чаще всего нужны в тот момент, когда нужного нет».
   onCreateDayType: () => void;
@@ -157,6 +165,7 @@ export function DayScreen({
   settings,
   onClose,
   onEntryDeleted,
+  requestCloseRef,
   onOpenPeriod,
   onCreateDayType,
   onOpenHolidays,
@@ -407,6 +416,17 @@ export function DayScreen({
     }
     setPendingDiscard(() => action);
   }
+
+  // Публикуем закрытие наружу на каждый рендер: обработчик замыкает черновик и
+  // isDirty, а они меняются с каждым нажатием клавиши. Сохранённый один раз, он
+  // отвечал бы на вопрос «есть что сохранять» состоянием на момент открытия дня.
+  useEffect(() => {
+    if (!requestCloseRef) return;
+    requestCloseRef.current = () => guardDraft(onClose);
+    return () => {
+      requestCloseRef.current = null;
+    };
+  });
 
   function handleSelectDayType(dt: DayType) {
     if (!hasEditedRef.current) {
