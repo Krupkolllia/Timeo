@@ -110,6 +110,11 @@ describe("parseBackup — приём", () => {
     expect(result.file).toEqual(file);
   });
 
+  it("файл с отметкой порядка байтов (BOM) читается", () => {
+    const result = parseBackup(`\uFEFF${serializeBackup(validFile())}`, NOW);
+    expect(result.ok).toBe(true);
+  });
+
   it("точные float-значения выживают разбор (раздел 5.4.1)", () => {
     const file = { ...validFile(), entries: [makeEntry({ amount: 399.59999999999997, multiplier: 1.566666 })] };
     const result = parse(file);

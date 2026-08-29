@@ -280,7 +280,10 @@ function parseTable<T>(
 export function parseBackup(text: string, now: string): BackupParseResult {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    // Отметку порядка байтов (BOM) снимаем сами: JSON.parse на ней падает, а
+    // файл, пересохранённый почтой или «Файлами», вполне может её получить —
+    // и человек увидел бы «это не JSON» на собственной, целой копии.
+    raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch {
     return { ok: false, error: { kind: "invalid_json" } };
   }
