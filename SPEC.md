@@ -305,14 +305,39 @@ the calculation layer and every stored row, for no gain the user can see.
   grosze and whole minutes. The code stores `number` for money and a decimal `hours` on the entry,
   rounding to the grosz once on the daily amount (18) and to two decimals on stored values. The
   totals reconcile exactly, which is what 19 actually protects.
+
+  6.1 derives duration in **whole integer minutes** — `"HH:MM"` is parsed by hand, no `Date` object
+  is built — and converts to the stored decimal `hours` by a single division by 60 that is
+  deliberately **not rounded**. Rounding the duration to hundredths would make a 7 h 20 min shift
+  store 7.33 and pay 219.90 zł instead of 220.00 at 30 zł/h; 18 rounds once, on the daily amount,
+  and pre-rounding the duration breaks that. `lib/format/hours.ts` renders the value (at most two
+  decimals) wherever it reaches the screen, which is what invariant 20 describes.
 - **Field names.** `day_types` stores `default_multiplier` for 5.3's `multiplier`, `default_rate`
   for `pinned_rate`, and `ignore_auto_multipliers` for the inverse of `allow_auto_multipliers`. The
   UI wording follows this document ("allow"); only the stored key is inverted. `rate_mode` decides
   whether `default_rate` is used — a value left in the field does not by itself pin the type.
 - **Day type default times are not implemented.** 5.3's `default_start`, `default_end`,
   `default_break_minutes` and `default_duration_minutes` do not exist; `default_hours` covers the
-  working path. 6.1's derivation of duration from start and end (and invariants 28 and 30) is not
-  implemented either, so a default time on a type would drive nothing. Deferred together with it.
+  working path. 6.1's derivation of duration from start and end **is now implemented** (invariants
+  28, 30, 31 and 32 with it), so the reason these were deferred alongside it has gone; they remain
+  outstanding on their own. Consequently 6.1's fallback branch reads
+  `day_type.default_hours` → `settings.default_hours` where the formula names
+  `day_type.default_duration_minutes`. The substitution is exact in meaning — both express "this
+  type of day lasts this long" — and adding the four fields would drag in a migration, the day type
+  editor, and 6.7's "update N entries?" offer, which is a separate change.
+
+- **The shift times are shown by a disclosure in the day sheet, not by `settings.show_shift_times`.**
+  The setting exists and still decides the initial state, but nothing could turn it on before block 7,
+  so 6.1 would have been invisible on the device. The sheet carries its own "Время смены" row, and a
+  day whose entry already holds times opens expanded. Block 7's settings toggle simply stops being
+  the only way in.
+
+- **`duration_is_manual` is true on every entry that predates 6.1.** The `version(8)` upgrader sets
+  the flag and changes nothing else — no stored `hours`, no `amount`, no `updated_at`, no closed
+  period. Nothing in the database was ever derived from the times, so true is the accurate value; false
+  would have made the next Save on any day with times rewrite a wage the user had typed by hand.
+  Import applies the same default to files written by older versions (invariant 50). Turning
+  derivation on for such a day is a visible, per-day act: the "считать по времени" button in 8.2.
 
 ### 5.5 `holidays`
 

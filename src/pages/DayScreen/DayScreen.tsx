@@ -1045,9 +1045,13 @@ export function DayScreen({
                         : ""}
                   </span>
                   {duration && !duration.derived && duration.can_derive && (
+                    // min-h-11: сама надпись ростом 16px — цель почти втрое
+                    // меньше минимальной (инвариант 59). Строка и так 44px
+                    // высотой, поэтому кнопка во всю её высоту ничего не
+                    // сдвигает, а px-2 добавляет запаса по горизонтали.
                     <button
                       onClick={handleRestoreDurationLink}
-                      className="shrink-0 text-xs font-semibold text-app-accent active:opacity-70"
+                      className="flex min-h-11 shrink-0 items-center px-2 text-xs font-semibold text-app-accent active:opacity-70"
                     >
                       {ru.day.durationRestoreLink}
                     </button>
