@@ -13,7 +13,9 @@ function makeDayType(overrides: Partial<DayType> = {}): DayType {
     deleted_at: null,
     name: "Рабочий день",
     color: "#000",
-    icon: "briefcase",
+    label: "Р",
+    note: "",
+    rate_mode: "multiplier",
     pay_mode: "hourly",
     fixed_amount: null,
     counts_as_work: true,
@@ -94,5 +96,24 @@ describe("resolveMultiplier", () => {
     const result = resolveMultiplier(new Date(2026, 0, 4), dayType, undefined, weekendMultipliers);
     expect(result.value).toBe(2);
     expect(result.source).toBe("sunday");
+  });
+
+  it("закрытый замок отменяет любой множитель (раздел 6.2, первое правило)", () => {
+    // Правило стоит первым и побеждает всё остальное: у типа со своей ставкой
+    // множителя нет вовсе, иначе воскресный коэффициент лёг бы поверх уже
+    // готовой ставки.
+    const pinned = makeDayType({ rate_mode: "pinned", default_rate: 55, default_multiplier: 2 });
+
+    // Воскресенье 4 января 2026 — правило выходного дало бы ×2.
+    expect(resolveMultiplier(new Date(2026, 0, 4), pinned, undefined, weekendMultipliers)).toEqual({
+      value: 1,
+      source: "pinned",
+    });
+    // Праздник — тоже.
+    expect(
+      resolveMultiplier(new Date(2026, 0, 5), pinned, makeHoliday(), weekendMultipliers),
+    ).toEqual({ value: 1, source: "pinned" });
+    // И собственный множитель типа дня.
+    expect(resolveMultiplier(new Date(2026, 0, 5), pinned, undefined, weekendMultipliers).value).toBe(1);
   });
 });

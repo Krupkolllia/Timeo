@@ -20,7 +20,7 @@ export interface RateChangePlanInput {
   newBaseRate: number;
   /** Все записи пользователя, которые попали в выборку. Планировщик сам отсекает чужие периоды. */
   entries: Entry[];
-  dayTypeById: Map<string, Pick<DayType, "pay_mode" | "fixed_amount">>;
+  dayTypeById: Map<string, Pick<DayType, "pay_mode" | "fixed_amount" | "rate_mode">>;
   /** Границы редактируемого периода включительно, YYYY-MM-DD. */
   periodStartISO: string;
   periodEndISO: string;
@@ -40,6 +40,11 @@ export interface RateChangePlanInput {
  * Из пересчёта исключены (инварианты 8 и 9):
  *  - записи с amount_override — их сумма задана человеком целиком;
  *  - записи с rate_is_manual — ставка отвязана от базовой;
+ *  - записи типа дня с закрытым замком (раздел 6.6: «пересчитывается, если
+ *    rate_is_manual = false, amount_override пуст И тип дня не pinned»). Свежие
+ *    записи такого типа и так помечены rate_is_manual, но запись, созданная до
+ *    закрытия замка, им не помечена — и без этой проверки смена базовой ставки
+ *    переписала бы ставку, которую тип дня объявил своей;
  *  - записи неизвестного типа дня — считать их не по чему, трогать нельзя.
  *
  * Патч не выпускается, если пересчёт дал те же числа: это и есть
@@ -59,6 +64,7 @@ export function planRateChange(input: RateChangePlanInput): EntryRatePatch[] {
 
     const dayType = input.dayTypeById.get(entry.day_type_id);
     if (!dayType) continue;
+    if (dayType.rate_mode === "pinned") continue;
 
     // Режим «с даты» без даты вырождается в пересчёт всего периода: это ровно
     // то, что означает «новая ставка действует с начала периода».

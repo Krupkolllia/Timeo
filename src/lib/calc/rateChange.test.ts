@@ -5,10 +5,12 @@ import type { DayType, Entry } from "@/types/models";
 const PERIOD_START = "2026-03-01";
 const PERIOD_END = "2026-03-31";
 
-const dayTypeById = new Map<string, Pick<DayType, "pay_mode" | "fixed_amount">>([
-  ["hourly", { pay_mode: "hourly", fixed_amount: null }],
-  ["unpaid", { pay_mode: "unpaid", fixed_amount: null }],
-  ["fixed", { pay_mode: "fixed_amount", fixed_amount: 120 }],
+const dayTypeById = new Map<string, Pick<DayType, "pay_mode" | "fixed_amount" | "rate_mode">>([
+  ["hourly", { pay_mode: "hourly", fixed_amount: null, rate_mode: "multiplier" }],
+  ["unpaid", { pay_mode: "unpaid", fixed_amount: null, rate_mode: "multiplier" }],
+  ["fixed", { pay_mode: "fixed_amount", fixed_amount: 120, rate_mode: "multiplier" }],
+  // Раздел 6.6: тип дня с закрытым замком из пересчёта исключён целиком.
+  ["pinned", { pay_mode: "hourly", fixed_amount: null, rate_mode: "pinned" }],
 ]);
 
 function entry(overrides: Partial<Entry> & Pick<Entry, "id" | "date">): Entry {
@@ -244,5 +246,14 @@ describe("planRateChange — применение с даты", () => {
     const second = plan("recalculate_period", applyPatches([legacy], first));
 
     expect(second).toEqual([]);
+  });
+
+  it("не пересчитывает записи типа дня с закрытым замком (раздел 6.6)", () => {
+    // Запись создана, когда замок у типа был открыт, поэтому rate_is_manual на
+    // ней ещё false. После закрытия замка её ставку объявил своей тип дня, и
+    // смена базовой ставки периода не имеет к ней отношения.
+    const row = entry({ id: "pinned-entry", date: "2026-03-10", day_type_id: "pinned" });
+
+    expect(plan("recalculate_period", [row])).toEqual([]);
   });
 });

@@ -108,6 +108,11 @@ function multiplierSourceLabel(source: MultiplierResult["source"]): string | nul
     case "day_type_ignore":
     case "day_type_default":
       return ru.day.multiplierSourceDayType;
+    // Раздел 6.2: у типа с закрытым замком множитель не применяется вовсе, и
+    // молча показать «×1» без причины значит оставить пользователя гадать,
+    // почему воскресный множитель не сработал.
+    case "pinned":
+      return ru.day.multiplierSourcePinned;
     case "default":
       return null;
   }

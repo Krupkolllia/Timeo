@@ -79,6 +79,7 @@ export const ru = {
     multiplierSourceSaturday: "суббота",
     multiplierSourceDayType: "тип дня",
     multiplierSourceManual: "задан вручную",
+    multiplierSourcePinned: "у типа дня своя ставка, множитель не применяется",
     rate: "Ставка за час",
     amount: "Сумма за день",
     note: "Заметка",

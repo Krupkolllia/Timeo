@@ -19,7 +19,9 @@ function makeDayType(overrides: Partial<DayType> = {}): DayType {
     deleted_at: null,
     name: "Рабочий день",
     color: "#000",
-    icon: "briefcase",
+    label: "Р",
+    note: "",
+    rate_mode: "multiplier",
     pay_mode: "hourly",
     fixed_amount: null,
     counts_as_work: true,
@@ -171,14 +173,55 @@ describe("buildEntryDefaultsForDayType", () => {
     expect(result.multiplier_source).toBe("sunday");
   });
 
-  it("собственная ставка типа дня считается ручной и не зависит от базовой", () => {
-    const dayType = makeDayType({ default_rate: 35, default_multiplier: 1.5 });
+  it("закрытый замок: ставка типа дня не зависит от базовой и множитель не применяется", () => {
+    // Раздел 6.2: «если rate_mode = pinned, множитель не применяется».
+    // Множитель у типа задан (1.5) и намеренно игнорируется: 35 zł/h — это уже
+    // готовая ставка, а не «база, к которой что-то применяют». Умножить на
+    // 1.5 сверху значило бы заплатить коэффициент дважды.
+    const dayType = makeDayType({ rate_mode: "pinned", default_rate: 35, default_multiplier: 1.5 });
     const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
 
     expect(result.rate_is_manual).toBe(true);
     expect(result.rate_per_hour).toBe(35);
-    expect(result.amount).toBe(420); // 8 × 35 × 1.5
-    expect(result.rate_source).toBe("manual");
+    expect(result.multiplier).toBe(1);
+    expect(result.amount).toBe(280); // 8 × 35, без множителя
+    expect(result.multiplier_source).toBe("pinned");
+    // Не "manual": число пришло из шаблона, а не с экрана дня (инвариант 15).
+    expect(result.rate_source).toBe("type_pinned");
+  });
+
+  it("закрытый замок отменяет и автоматический множитель выходного", () => {
+    // 5 января 2026 — понедельник; берём воскресенье 4 января, где правило
+    // выходного дало бы ×2. Для типа со своей ставкой оно не применяется.
+    const dayType = makeDayType({ rate_mode: "pinned", default_rate: 35 });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 4), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.multiplier).toBe(1);
+    expect(result.amount).toBe(280);
+  });
+
+  it("открытый замок: оставшееся в поле число ставки не отвязывает тип от базовой", () => {
+    // Пользователь закрывал замок, вписал 35, потом открыл обратно, не стирая
+    // число. Признак — rate_mode, а не «default_rate не null»: иначе тип
+    // навсегда оставался бы отвязанным от периода из-за забытого значения.
+    const dayType = makeDayType({ rate_mode: "multiplier", default_rate: 35, default_multiplier: 1.5 });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.rate_is_manual).toBe(false);
+    expect(result.rate_per_hour).toBe(period.base_rate);
+    expect(result.multiplier).toBe(1.5);
+    expect(result.rate_source).toBe("period_base");
+  });
+
+  it("закрытый замок с пустой ставкой даёт ноль, а не откат к базовой ставке периода", () => {
+    // Раздел 9 запрещает блокировать сохранение, поэтому такой тип дня
+    // существует. Подставить вместо пустого поля базовую ставку значило бы
+    // показать число, которого пользователь не задавал.
+    const dayType = makeDayType({ rate_mode: "pinned", default_rate: null });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.rate_per_hour).toBe(0);
+    expect(result.amount).toBe(0);
   });
 
   it("respects fixed_amount pay mode regardless of hours/multiplier", () => {

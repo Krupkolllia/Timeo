@@ -2,7 +2,7 @@ import type { DayType, Holiday, WeekendMultipliers } from "@/types/models";
 
 export interface MultiplierResult {
   value: number;
-  source: "day_type_ignore" | "holiday" | "sunday" | "saturday" | "day_type_default" | "default";
+  source: "pinned" | "day_type_ignore" | "holiday" | "sunday" | "saturday" | "day_type_default" | "default";
 }
 
 /**
@@ -15,6 +15,16 @@ export function resolveMultiplier(
   holiday: Holiday | undefined,
   weekendMultipliers: WeekendMultipliers,
 ): MultiplierResult {
+  // Раздел 6.2, первая строка: «если rate_mode = pinned, множитель не
+  // применяется». У типа со своей ставкой сумма — это часы × его ставка, и
+  // накладывать сверху ещё и коэффициент значит платить за воскресенье дважды.
+  //
+  // Ветка была недостижима до блока 4: default_rate равен null у всех пресетов,
+  // и задать его было нечем. Теперь задать можно, и правило обязано работать.
+  if (dayType.rate_mode === "pinned") {
+    return { value: 1, source: "pinned" };
+  }
+
   if (dayType.ignore_auto_multipliers) {
     // Ранний выход обязателен в любом случае: он и есть подавление правил
     // выходного/праздника (раздел 5.3 — отпуск в воскресенье не оплачивается
