@@ -54,7 +54,19 @@ export async function ensureSettings(db: TimeoDB, userId: string): Promise<Setti
 export async function updateWeekendMultipliers(
   db: TimeoDB,
   id: string,
-  multipliers: Settings["weekend_multipliers"],
+  patch: Partial<Settings["weekend_multipliers"]>,
 ): Promise<void> {
-  await db.settings.update(id, { weekend_multipliers: multipliers, updated_at: new Date().toISOString() });
+  // Читаем и пишем одной транзакцией, а не подставляем объект целиком с
+  // экрана: useLiveQuery отдаёт компоненту снимок, и правка второго поля
+  // раньше, чем приедет обновлённая строка, унесла бы в базу прежнее значение
+  // первого. Пользователь увидел бы, как только что заданный субботний
+  // множитель молча вернулся к единице.
+  await db.transaction("rw", db.settings, async () => {
+    const settings = await db.settings.get(id);
+    if (!settings) return;
+    await db.settings.update(id, {
+      weekend_multipliers: { ...settings.weekend_multipliers, ...patch },
+      updated_at: new Date().toISOString(),
+    });
+  });
 }

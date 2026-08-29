@@ -257,3 +257,36 @@ describe("HolidaysPage — возврат после ?add=", () => {
     expect(screen.getByText("День фирмы")).toBeInTheDocument();
   });
 });
+
+describe("HolidaysPage — незаконченный ввод даты", () => {
+  it("пустая дата не сохраняется как пустая строка и объясняется на экране", async () => {
+    await seed();
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: ru.holidays.add }));
+    fireEvent.change(screen.getByLabelText(ru.holidays.date), { target: { value: "2026-12-31" } });
+    // Нативный выбор даты умеет быть пустым и отдаёт "" на середине правки.
+    fireEvent.change(screen.getByLabelText(ru.holidays.date), { target: { value: "" } });
+
+    expect(screen.getByText(new RegExp(ru.holidays.emptyDateWarning))).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: ru.holidays.save }));
+
+    await waitFor(async () => {
+      const rows = await db.holidays.toArray();
+      expect(rows).toHaveLength(1);
+      // Сохраняется последняя полная дата, а не "" — иначе строка не совпала бы
+      // ни с одним днём календаря и рисовалась бы как «undefined undefined».
+      expect(rows[0].date).toBe("2026-12-31");
+    });
+  });
+
+  it("сохранение сразу после открытия формы берёт дату, с которой она открылась", async () => {
+    await seed();
+    renderPage("/settings/holidays?add=2026-08-10&return=%2F");
+
+    fireEvent.change(await screen.findByLabelText(ru.holidays.date), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.holidays.save }));
+
+    await waitFor(async () => expect((await db.holidays.toArray())[0].date).toBe("2026-08-10"));
+  });
+});

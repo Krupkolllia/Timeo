@@ -36,6 +36,13 @@ export function HolidaysPage() {
   // сохранение не должно снова уносить пользователя в тот день.
   const [returnAfterSave, setReturnAfterSave] = useState(addDate !== null);
   const [draftDate, setDraftDate] = useState(addDate ?? toISODate(new Date()));
+  // Последняя дата, которую поле отдало в полном виде. Нативный выбор даты
+  // умеет быть пустым и отдаёт "" на середине правки, а пустая строка,
+  // сохранённая как дата, — это строка «undefined undefined» в списке, год без
+  // названия и запись, которая не совпадёт ни с одним днём календаря. Правило
+  // то же, что у NumberInput: незаконченный ввод не распространяется дальше
+  // поля, и ничего при этом не блокируется (инвариант 56).
+  const [lastValidDate, setLastValidDate] = useState(addDate ?? toISODate(new Date()));
   const [draftName, setDraftName] = useState("");
   const [pendingUndo, setPendingUndo] = useState<Holiday | null>(null);
   const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,17 +69,26 @@ export function HolidaysPage() {
   // Раздел 9: предупреждение, а не запрет. Два праздника на одну дату
   // разрешены инвариантом 53, но сказать об этом надо до сохранения.
   const duplicateWarning = (holidays ?? []).some((holiday) => holiday.date === draftDate);
+  // Поле пустое: говорим, какая дата сохранится, вместо того чтобы запрещать
+  // сохранение (раздел 9 — предупреждение, а не запрет).
+  const emptyDateWarning = !ISO_DATE.test(draftDate);
 
   function openForm(date: string) {
     setDraftDate(date);
+    setLastValidDate(date);
     setDraftName("");
     setFormOpen(true);
+  }
+
+  function handleDateChange(value: string) {
+    setDraftDate(value);
+    if (ISO_DATE.test(value)) setLastValidDate(value);
   }
 
   async function handleSave() {
     // Ничего не проверяем: пустое имя, дата в прошлом и повтор даты сохраняются
     // как есть (инвариант 56, раздел 9).
-    await createHoliday(db, userId, { date: draftDate, name: draftName });
+    await createHoliday(db, userId, { date: ISO_DATE.test(draftDate) ? draftDate : lastValidDate, name: draftName });
     setFormOpen(false);
     setDraftName("");
     // Пришли из дня ради конкретной даты — возвращаем туда же.
@@ -98,7 +114,10 @@ export function HolidaysPage() {
 
   function handleMultiplierChange(patch: Partial<{ saturday: number; sunday: number; holiday: number }>) {
     if (!settings) return;
-    void updateWeekendMultipliers(db, settings.id, { ...settings.weekend_multipliers, ...patch });
+    // Патч, а не собранный целиком объект: слияние делает слой данных внутри
+    // транзакции, иначе быстрая правка второго поля вернула бы первое к
+    // прежнему значению.
+    void updateWeekendMultipliers(db, settings.id, patch);
   }
 
   if (!settings || holidays === undefined) {
@@ -146,7 +165,7 @@ export function HolidaysPage() {
               type="date"
               className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
               value={draftDate}
-              onChange={(event) => setDraftDate(event.target.value)}
+              onChange={(event) => handleDateChange(event.target.value)}
             />
           </div>
           <div>
@@ -164,8 +183,10 @@ export function HolidaysPage() {
           </div>
           {/* Высота зарезервирована всегда: строка, появляющаяся по совпадению
               даты, иначе двигала бы кнопку сохранения под пальцем. */}
-          <p className={`text-xs text-white/40 ${duplicateWarning ? "" : "invisible"}`}>
-            {ru.holidays.duplicateWarning}
+          <p className={`text-xs text-white/40 ${emptyDateWarning || duplicateWarning ? "" : "invisible"}`}>
+            {emptyDateWarning
+              ? `${ru.holidays.emptyDateWarning} ${formatDayShort(lastValidDate)}`
+              : ru.holidays.duplicateWarning}
           </p>
         </div>
       ) : (

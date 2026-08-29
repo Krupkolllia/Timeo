@@ -88,3 +88,35 @@ describe("updateWeekendMultipliers", () => {
     }
   });
 });
+
+describe("updateWeekendMultipliers — слияние", () => {
+  it("правит одно поле, не трогая соседние", async () => {
+    const database = new TimeoDB(`timeo-test-${crypto.randomUUID()}`);
+    try {
+      const settings = await ensureSettings(database, "user-1");
+      await updateWeekendMultipliers(database, settings.id, { saturday: 1.5 });
+      await updateWeekendMultipliers(database, settings.id, { sunday: 2 });
+
+      // Слияние делает слой данных внутри транзакции: экран отдаёт только
+      // изменённое поле, поэтому вторая правка не может вернуть первую к
+      // прежнему значению по устаревшему снимку из useLiveQuery.
+      expect((await database.settings.get(settings.id))?.weekend_multipliers).toEqual({
+        saturday: 1.5,
+        sunday: 2,
+        holiday: 1,
+      });
+    } finally {
+      await database.delete();
+    }
+  });
+
+  it("молча ничего не делает, если строки настроек нет", async () => {
+    const database = new TimeoDB(`timeo-test-${crypto.randomUUID()}`);
+    try {
+      await updateWeekendMultipliers(database, "нет-такой", { holiday: 2 });
+      expect(await database.settings.count()).toBe(0);
+    } finally {
+      await database.delete();
+    }
+  });
+});
