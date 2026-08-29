@@ -1,4 +1,5 @@
 import { ru } from "@/i18n/ru";
+import { formatHours } from "@/lib/format/hours";
 import type { DayType, Entry } from "@/types/models";
 
 /**
@@ -34,7 +35,10 @@ export function formatEntryDetail(
   entry: Pick<Entry, "hours" | "rate_per_hour" | "multiplier" | "amount_override" | "rate_source" | "rate_is_manual">,
   payMode: DayType["pay_mode"] | undefined,
 ): string {
-  const hours = `${entry.hours}${ru.calendar.hoursShort}`;
+  // formatHours, а не entry.hours: выведенная из времён длительность лежит в
+  // базе неокруглённой (7ч20м = 7.333333333333333), и в строке расшифровки
+  // такое число нечитаемо.
+  const hours = `${formatHours(entry.hours)}${ru.calendar.hoursShort}`;
   const parts =
     payMode === "unpaid"
       ? [hours, ru.period.payModeUnpaid]

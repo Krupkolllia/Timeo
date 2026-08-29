@@ -11,6 +11,8 @@ import {
   type EntryDefaults,
 } from "@/lib/calc/entry";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
+import { resolveDuration } from "@/lib/calc/duration";
+import { formatHours } from "@/lib/format/hours";
 import { pickHoliday } from "@/lib/calc/holidays";
 import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
@@ -64,6 +66,7 @@ type EntryDraft = Pick<
   | "start_time"
   | "end_time"
   | "break_minutes"
+  | "duration_is_manual"
   | "rate_source"
 >;
 
@@ -80,6 +83,7 @@ function entryToDraft(entry: Entry): EntryDraft {
     start_time: entry.start_time,
     end_time: entry.end_time,
     break_minutes: entry.break_minutes,
+    duration_is_manual: entry.duration_is_manual,
     rate_source: entry.rate_source,
   };
 }
@@ -103,6 +107,7 @@ function draftsEqual(a: EntryDraft, b: EntryDraft): boolean {
     a.start_time === b.start_time &&
     a.end_time === b.end_time &&
     a.break_minutes === b.break_minutes &&
+    a.duration_is_manual === b.duration_is_manual &&
     a.rate_source === b.rate_source
   );
 }
@@ -120,6 +125,10 @@ function draftFromDefaults(dayTypeId: string, defaults: EntryDefaults): EntryDra
     start_time: null,
     end_time: null,
     break_minutes: null,
+    // Новая запись начинает со ЖИВОЙ связью: как только заданы начало и конец,
+    // длительность считается по ним (раздел 6.1). Связь рвёт только правка
+    // часов руками, и только её (раздел 8.2).
+    duration_is_manual: false,
     rate_source: defaults.rate_source,
   };
 }
@@ -264,6 +273,31 @@ export function DayScreen({
    * записи признаком «есть что сохранять» служит сам факт правки (touched).
    */
   const [baseline, setBaseline] = useState<EntryDraft | null>(null);
+
+  /**
+   * Раскрыт ли блок времени смены. Раздел 6.1 доехал до экрана только сейчас, а
+   * единственный переключатель показа времён (settings.show_shift_times) до
+   * блока 7 не может включить никто — по нему функция была бы невидима на
+   * телефоне вовсе. Поэтому раскрытие живёт в самой шторке, по дню: настройка
+   * задаёт лишь начальное состояние, а блок 7 просто перестанет быть
+   * единственным способом.
+   */
+  const [shiftTimesOpen, setShiftTimesOpen] = useState(settings.show_shift_times);
+
+  // Запись, у которой времена уже заполнены, обязана показывать их сразу:
+  // спрятанное начало смены, влияющее на часы, — это ровно тот случай, когда
+  // число на экране необъяснимо (инвариант 55). Закрывать блок обратно эффект
+  // не пытается: свернуть его — решение человека.
+  useEffect(() => {
+    if (!entry) return;
+    if (entry.start_time !== null || entry.end_time !== null || entry.break_minutes !== null) {
+      setShiftTimesOpen(true);
+    }
+    // Зависимости — поля записи, а не сама запись: useLiveQuery отдаёт новый
+    // объект на каждое чтение из Dexie, и по entry эффект срабатывал бы на
+    // каждый кадр.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry?.id, entry?.start_time, entry?.end_time, entry?.break_minutes]);
 
   // Отложенное действие, которое ждёт ответа на вопрос о несохранённом.
   // Функция в состоянии — только через обёртку: useState вызывает переданную
@@ -462,21 +496,53 @@ export function DayScreen({
         rate_is_manual: defaults.rate_is_manual,
         rate_source: defaults.rate_source,
       };
-      const recomputed = calculateEntryAmount(switched, dt, period);
-      applyDraft({ ...switched, amount: recomputed.amount, rate_per_hour: recomputed.rate_per_hour });
+      applyDraft(withDerivedDuration(switched, dt));
       return;
     }
 
-    const next = { ...draft, day_type_id: dt.id };
-    const { amount, rate_per_hour } = calculateEntryAmount(next, dt, period);
-    applyDraft({ ...next, amount, rate_per_hour });
+    // withDerivedDuration, а не голый calculateEntryAmount: ветка «по умолчанию»
+    // формулы 6.1 берёт default_hours НОВОГО типа дня, а при живой связи и
+    // заданных временах длительность остаётся выведенной из них. Вписанные
+    // руками часы (duration_is_manual) переживают смену типа — ради них эта
+    // ветка и существует.
+    applyDraft(withDerivedDuration({ ...draft, day_type_id: dt.id }, dt));
   }
 
+  /**
+   * Раздел 6.1 на черновике: длительность выводится заново, сумма пересчитывается
+   * по 6.4. В базу здесь не уходит ничего — как и во всём этом экране, запись
+   * происходит только по кнопке «Сохранить» (раздел 8.2).
+   *
+   * Вызывается только там, где вход формулы 6.1 реально изменился: времена,
+   * перерыв, тип дня, восстановление связи. На каждый рендер вывод НЕ гоняется —
+   * иначе изменившийся default_hours типа дня переписывал бы часы уже
+   * сохранённой записи, а инвариант 10 это прямо запрещает.
+   */
+  function withDerivedDuration(next: EntryDraft, dt: DayType): EntryDraft {
+    const { hours } = resolveDuration(next, dt);
+    const { amount, rate_per_hour } = calculateEntryAmount({ ...next, hours }, dt, period);
+    return { ...next, hours, amount, rate_per_hour };
+  }
+
+  /**
+   * Раздел 8.2: правка часов руками ставит duration_is_manual и разрывает связь
+   * с временами. Флаг ставится и когда времён нет вовсе: разрывать в этот
+   * момент нечего, но именно он не даст выведенной длительности затереть
+   * набранное, если времена появятся позже.
+   */
   function handleHoursChange(hours: number) {
     if (!draft || !dayType) return;
     hasEditedRef.current = true;
-    const { amount, rate_per_hour } = calculateEntryAmount({ ...draft, hours }, dayType, period);
-    applyDraft({ ...draft, hours, amount, rate_per_hour });
+    const next = { ...draft, hours, duration_is_manual: true };
+    const { amount, rate_per_hour } = calculateEntryAmount(next, dayType, period);
+    applyDraft({ ...next, amount, rate_per_hour });
+  }
+
+  /** Раздел 8.2: кнопка «считать по времени» возвращает разорванную связь. */
+  function handleRestoreDurationLink() {
+    if (!draft || !dayType) return;
+    hasEditedRef.current = true;
+    applyDraft(withDerivedDuration({ ...draft, duration_is_manual: false }, dayType));
   }
 
   // Правила правки множителя и ставки живут в lib/calc/entry: они уже ломались
@@ -517,10 +583,17 @@ export function DayScreen({
     applyDraft({ ...draft, amount_override: value, amount, rate_per_hour });
   }
 
+  /**
+   * Начало, конец и перерыв — входы формулы раздела 6.1, поэтому длительность
+   * и сумма пересчитываются здесь же. При разорванной связи
+   * (duration_is_manual) время всё равно записывается, но часов не двигает:
+   * resolveDuration возвращает вписанное человеком число.
+   */
   function handleShiftTimeChange(patch: Partial<Pick<EntryDraft, "start_time" | "end_time" | "break_minutes">>) {
     if (!draft) return;
     hasEditedRef.current = true;
-    applyDraft({ ...draft, ...patch });
+    const next = { ...draft, ...patch };
+    applyDraft(dayType ? withDerivedDuration(next, dayType) : next);
   }
 
   function startNewEntry() {
@@ -589,6 +662,10 @@ export function DayScreen({
       : autoMultiplier.value === draft.multiplier
         ? multiplierSourceLabel(autoMultiplier.source)
         : ru.day.multiplierSourceManual;
+
+  // Раздел 6.1 на текущем черновике — откуда взялась длительность и можно ли
+  // вернуть связь с временами (раздел 8.2).
+  const duration = draft && dayType ? resolveDuration(draft, dayType) : null;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
   // Нулевая базовая ставка периода — причина, а «ставка за час равна нулю» —
@@ -685,7 +762,7 @@ export function DayScreen({
                 e.id === entry?.id ? "bg-white/15 text-white" : "bg-white/5 text-white/60"
               }`}
             >
-              {index + 1}. {dayTypeById.get(e.day_type_id)?.name} · {e.hours}
+              {index + 1}. {dayTypeById.get(e.day_type_id)?.name} · {formatHours(e.hours)}
               {ru.calendar.hoursShort}
             </button>
           ))}
@@ -786,6 +863,10 @@ export function DayScreen({
                 className="w-20 rounded-lg bg-white/5 px-2 py-2 text-center text-lg"
                 value={draft.hours}
                 onChange={handleHoursChange}
+                // Выведенная из времён длительность хранится неокруглённой
+                // (7ч20м = 7.333333333333333), иначе на смене теряются гроши.
+                // В поле шириной 80px её показывает formatHours.
+                format={formatHours}
               />
               <button
                 className="h-11 w-11 rounded-full bg-white/10 text-lg active:bg-white/20"
@@ -881,48 +962,100 @@ export function DayScreen({
             </button>
           )}
 
-          {settings.show_shift_times && (
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-white/50" htmlFor="day-start-time">{ru.day.startTime}</label>
-                <input
-                  id="day-start-time"
-                  type="time"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
-                  value={draft.start_time ?? ""}
-                  onChange={(e) => handleShiftTimeChange({ start_time: e.target.value || null })}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-white/50" htmlFor="day-end-time">{ru.day.endTime}</label>
-                <input
-                  id="day-end-time"
-                  type="time"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
-                  value={draft.end_time ?? ""}
-                  onChange={(e) => handleShiftTimeChange({ end_time: e.target.value || null })}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-white/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
-                <input
-                  id="day-break-minutes"
-                  type="number"
-                  inputMode="numeric"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
-                  value={draft.break_minutes ?? ""}
-                  onChange={(e) => {
-                    if (e.target.value === "") {
-                      handleShiftTimeChange({ break_minutes: null });
-                      return;
-                    }
-                    const parsed = parseNumberInput(e.target.value);
-                    if (parsed !== null) handleShiftTimeChange({ break_minutes: parsed });
-                  }}
-                />
-              </div>
-            </div>
-          )}
+          {/* Раздел 8.2: начало, конец и перерыв. Раскрывающийся блок, а не
+              настройка: settings.show_shift_times задаёт лишь начальное
+              состояние, а включить его до блока 7 не может никто — по одной
+              настройке раздел 6.1 остался бы невидимым на телефоне.
+
+              Рост шторки здесь начинает сам человек, поэтому резервировать
+              высоту всего блока не нужно; резервируются только две строки
+              ВНУТРИ него — предупреждение о перерыве и строка связи, — иначе
+              они появлялись бы сами и двигали поля под пальцем. */}
+          <div className="shrink-0">
+            <button
+              onClick={() => setShiftTimesOpen((open) => !open)}
+              aria-expanded={shiftTimesOpen}
+              className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+            >
+              <span className="text-xs text-white/50">{ru.day.shiftTimes}</span>
+              <span className="shrink-0 text-xs font-semibold text-app-accent">
+                {shiftTimesOpen ? ru.day.shiftTimesHide : ru.day.shiftTimesShow}
+              </span>
+            </button>
+
+            {shiftTimesOpen && (
+              <>
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-white/50" htmlFor="day-start-time">{ru.day.startTime}</label>
+                    <input
+                      id="day-start-time"
+                      type="time"
+                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      value={draft.start_time ?? ""}
+                      onChange={(e) => handleShiftTimeChange({ start_time: e.target.value || null })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50" htmlFor="day-end-time">{ru.day.endTime}</label>
+                    <input
+                      id="day-end-time"
+                      type="time"
+                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      value={draft.end_time ?? ""}
+                      onChange={(e) => handleShiftTimeChange({ end_time: e.target.value || null })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
+                    <input
+                      id="day-break-minutes"
+                      type="number"
+                      inputMode="numeric"
+                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      value={draft.break_minutes ?? ""}
+                      onChange={(e) => {
+                        if (e.target.value === "") {
+                          handleShiftTimeChange({ break_minutes: null });
+                          return;
+                        }
+                        const parsed = parseNumberInput(e.target.value);
+                        if (parsed !== null) handleShiftTimeChange({ break_minutes: parsed });
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Инвариант 30: перерыв длиннее смены — предупреждение, а не
+                    запрет. Высота зарезервирована. */}
+                <p className={`mt-1 text-xs text-white/40 ${duration?.break_exceeds_shift ? "" : "invisible"}`}>
+                  {ru.day.hintBreakExceedsShift}
+                </p>
+
+                {/* Раздел 8.2: состояние связи «часы ↔ времена» и кнопка её
+                    вернуть. Строка рисуется всегда с одинаковой высотой —
+                    кнопка, появляющаяся сама, сдвигала бы поля ровно тогда,
+                    когда человек в них целится. */}
+                <div className="flex min-h-11 items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-xs text-white/40">
+                    {duration?.derived
+                      ? ru.day.durationDerived
+                      : duration?.can_derive
+                        ? ru.day.durationManual
+                        : ""}
+                  </span>
+                  {duration && !duration.derived && duration.can_derive && (
+                    <button
+                      onClick={handleRestoreDurationLink}
+                      className="shrink-0 text-xs font-semibold text-app-accent active:opacity-70"
+                    >
+                      {ru.day.durationRestoreLink}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
 
           <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
             <span className="text-sm">{ru.day.manualAmountToggle}</span>

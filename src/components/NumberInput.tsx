@@ -8,6 +8,17 @@ interface NumberInputProps {
   className?: string;
   inputMode?: "decimal" | "numeric";
   disabled?: boolean;
+  /**
+   * Как показать число в поле. По умолчанию String(value) — ровно то, что
+   * лежит в модели. Поле часов передаёт сюда formatHours: длительность,
+   * выведенная из времён (раздел 6.1), хранится неокруглённой, и без этого
+   * человек видел бы в поле шириной 80px «7.333333333333333».
+   *
+   * Инвариант 20: показанное округление никогда не записывается обратно
+   * вместо исходного значения — onChange отдаёт то, что человек набрал сам,
+   * а этот формат работает только на отображение.
+   */
+  format?: (value: number) => string;
 }
 
 // A number in progress: optional single "-", no leading zeros (other than "0"
@@ -21,11 +32,24 @@ const IN_PROGRESS_NUMBER = /^-?(0|[1-9]\d*)?(\.\d*)?$/;
 // "0" before the user can finish typing a decimal or a negative number. This
 // keeps its own text buffer and only reformats it when the value changes for a
 // reason other than the user's own typing (e.g. tapping a different day type).
-export function NumberInput({ id, value, onChange, className, inputMode = "decimal", disabled }: NumberInputProps) {
-  const [text, setText] = useState(String(value));
+export function NumberInput({
+  id,
+  value,
+  onChange,
+  className,
+  inputMode = "decimal",
+  disabled,
+  format = String,
+}: NumberInputProps) {
+  const [text, setText] = useState(() => format(value));
 
   useEffect(() => {
-    if (Number(text) !== value) setText(String(value));
+    // Условие остаётся прежним: пока набранный текст РАЗБИРАЕТСЯ в текущее
+    // значение, его не трогаем — иначе «8.» схлопывалось бы обратно в «8» на
+    // полпути. При формате с потерей точности (часы) Number(text) значению не
+    // равен никогда, и setText просто перезаписывает ту же самую строку —
+    // React на одинаковом значении состояния не перерисовывает.
+    if (Number(text) !== value) setText(format(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -63,7 +87,7 @@ export function NumberInput({ id, value, onChange, className, inputMode = "decim
         const parsed = Number(next);
         if (!Number.isNaN(parsed)) onChange(parsed);
       }}
-      onBlur={() => setText(String(value))}
+      onBlur={() => setText(format(value))}
     />
   );
 }

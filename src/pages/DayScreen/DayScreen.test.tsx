@@ -5,6 +5,7 @@ import { DayScreen } from "@/pages/DayScreen/DayScreen";
 import { ru } from "@/i18n/ru";
 import type { DayType, Entry, Period, Settings } from "@/types/models";
 import { makeDayType, makeEntry, makeHoliday, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
+import { calculatePeriodTotals, periodForDate } from "@/lib/calc/period";
 
 const DATE = "2026-08-10"; // понедельник
 const SATURDAY = "2026-08-15";
@@ -762,6 +763,360 @@ describe("DayScreen — время смены", () => {
     type(screen.getByLabelText(ru.day.breakMinutes), " ");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect((await savedEntry()).break_minutes).not.toBeNaN();
+  });
+});
+
+describe("DayScreen — длительность из времён (раздел 6.1)", () => {
+  /** Раскрывает блок времени смены — до блока 7 это единственный путь к нему. */
+  function openShiftTimes() {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(ru.day.shiftTimesShow) }));
+  }
+
+  it("блок времени раскрывается из самой шторки, без настройки", async () => {
+    // settings.show_shift_times = false по умолчанию, и включить его до блока 7
+    // не может никто. Без этой кнопки раздел 6.1 был бы невидим на телефоне.
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    expect(screen.queryByLabelText(ru.day.startTime)).not.toBeInTheDocument();
+
+    openShiftTimes();
+    expect(screen.getByLabelText(ru.day.startTime)).toBeInTheDocument();
+  });
+
+  it("начало и конец задают часы и сумму", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:00");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(8);
+    expect(entry.amount).toBe(240);
+    expect(entry.duration_is_manual).toBe(false);
+  });
+
+  it("перерыв вычитается из смены", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:00");
+    type(screen.getByLabelText(ru.day.breakMinutes), "30");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(7.5);
+    expect(entry.amount).toBe(225);
+  });
+
+  it("инвариант 28: смена через полночь — восемь часов, а не минус шестнадцать", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "22:00");
+    type(screen.getByLabelText(ru.day.endTime), "06:00");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(8);
+    expect(entry.amount).toBe(240);
+  });
+
+  it("инвариант 28: одинаковые времена дают полные сутки", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "08:00");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(24);
+    expect(entry.amount).toBe(720);
+  });
+
+  it("7ч20м сохраняются суммой до гроша, а в поле показываются как 7.33", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "15:20");
+
+    // Сначала экран: округлённое число видно человеку, но в базу не уходит
+    // (инвариант 20).
+    expect(fields().hours).toHaveValue("7.33");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(440 / 60);
+    // 7.33 × 30 дало бы 219.90 — те самые десять грошей.
+    expect(entry.amount).toBe(220);
+  });
+
+  it("инвариант 30: перерыв длиннее смены даёт ноль часов, предупреждает и сохраняется", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:00");
+    type(screen.getByLabelText(ru.day.breakMinutes), "600");
+
+    expect(screen.getByText(ru.day.hintBreakExceedsShift)).toBeVisible();
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(0);
+    expect(entry.amount).toBe(0);
+  });
+
+  it("инвариант 32: смена длиннее суток сохраняется с мягким предупреждением", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "08:00");
+    type(screen.getByLabelText(ru.day.breakMinutes), "-120");
+
+    expect(screen.getByText(ru.day.hintManyHours)).toBeVisible();
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(26);
+  });
+
+  it("очищенный конец смены возвращает часы к значению по умолчанию типа дня", async () => {
+    // Раздел 6.1, ветка «иначе»: без пары времён выводить не из чего.
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:30");
+    expect(fields().hours).toHaveValue("8.5");
+
+    type(screen.getByLabelText(ru.day.endTime), "");
+    expect(fields().hours).toHaveValue("8");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(8);
+    expect(entry.end_time).toBeNull();
+  });
+});
+
+describe("DayScreen — связь длительности с временами (раздел 8.2)", () => {
+  function openShiftTimes() {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(ru.day.shiftTimesShow) }));
+  }
+
+  async function withTimes() {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:00");
+    await waitFor(() => expect(fields().hours).toHaveValue("8"));
+  }
+
+  it("правка часов руками рвёт связь, и времена больше её не двигают", async () => {
+    await withTimes();
+    expect(screen.getByText(ru.day.durationDerived)).toBeVisible();
+
+    type(fields().hours, "5");
+    expect(screen.getByText(ru.day.durationManual)).toBeVisible();
+
+    // Время меняется, часы — нет: связь разорвана.
+    type(screen.getByLabelText(ru.day.breakMinutes), "30");
+    expect(fields().hours).toHaveValue("5");
+
+    const entry = await savedEntry();
+    expect(entry.duration_is_manual).toBe(true);
+    expect(entry.hours).toBe(5);
+    expect(entry.break_minutes).toBe(30);
+    expect(entry.amount).toBe(150);
+  });
+
+  it("кнопка «считать по времени» возвращает связь и пересчитывает сумму", async () => {
+    await withTimes();
+    type(fields().hours, "5");
+    type(screen.getByLabelText(ru.day.breakMinutes), "30");
+    expect(fields().hours).toHaveValue("5");
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.durationRestoreLink }));
+    expect(fields().hours).toHaveValue("7.5");
+
+    const entry = await savedEntry();
+    expect(entry.duration_is_manual).toBe(false);
+    expect(entry.hours).toBe(7.5);
+    expect(entry.amount).toBe(225);
+  });
+
+  it("без времён кнопки восстановления нет — восстанавливать нечего", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    openShiftTimes();
+    type(fields().hours, "5");
+
+    expect(screen.queryByRole("button", { name: ru.day.durationRestoreLink })).not.toBeInTheDocument();
+    expect(screen.queryByText(ru.day.durationManual)).not.toBeInTheDocument();
+  });
+
+  it("запись с разорванной связью не пересчитывается при открытии дня", async () => {
+    // Ровно то, что делает миграция version(8) со всеми существующими днями:
+    // времена заполнены, часы вписаны руками, и открытие дня не двигает деньги.
+    await db.entries.add(
+      makeEntry({
+        hours: 8,
+        amount: 240,
+        start_time: "08:00",
+        end_time: "16:00",
+        break_minutes: 30,
+        duration_is_manual: true,
+      }),
+    );
+    renderDay();
+
+    // Блок времени раскрывается сам: спрятанное начало смены объясняло бы часы
+    // молча (инвариант 55).
+    expect(await screen.findByLabelText(ru.day.startTime)).toHaveValue("08:00");
+    expect(fields().hours).toHaveValue("8");
+    expect(screen.getByText(ru.day.durationManual)).toBeVisible();
+
+    const entry = await onlyEntry();
+    expect(entry.hours).toBe(8);
+    expect(entry.amount).toBe(240);
+  });
+
+  it("смена типа дня не рвёт живую связь и сохраняет разорванную", async () => {
+    await withTimes();
+    // Живая связь: часы остаются выведенными из времён, а не откатываются к
+    // default_hours нового типа.
+    fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
+    expect(fields().hours).toHaveValue("8");
+    expect(screen.getByText(ru.day.durationDerived)).toBeVisible();
+
+    // Разорванная связь переживает смену типа: вписанные 5 часов не заменяются
+    // ни выводом из времён, ни значением по умолчанию типа (8).
+    type(fields().hours, "5");
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    expect(fields().hours).toHaveValue("5");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(5);
+    expect(entry.duration_is_manual).toBe(true);
+  });
+
+  it("смена типа до первой правки берёт часы нового типа и оставляет связь живой", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Отгул" }));
+    expect(fields().hours).toHaveValue("0");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(0);
+    expect(entry.duration_is_manual).toBe(false);
+  });
+});
+
+describe("DayScreen — ночная смена на границе периодов (инвариант 29)", () => {
+  it("смена с 31 августа 22:00 по 1 сентября 06:00 целиком принадлежит августу", async () => {
+    // Инвариант 29: часы и деньги никогда не делятся между периодами. Период
+    // записи решает её поле date, а вывод длительности (раздел 6.1) дат не
+    // касается вовсе.
+    const SEPTEMBER_ENTRY = makeEntry({
+      id: "e-september",
+      date: "2026-09-01",
+      hours: 8,
+      amount: 240,
+      duration_is_manual: true,
+    });
+    await db.entries.add(SEPTEMBER_ENTRY);
+
+    const september = makePeriod({ id: "p-2026-09", year: 2026, month: 9 });
+    const totalsFor = async (year: number, month: number) => {
+      const rows = (await db.entries.where("user_id").equals(USER_ID).toArray()).filter(
+        (row) =>
+          row.deleted_at === null &&
+          periodForDate(
+            new Date(Number(row.date.slice(0, 4)), Number(row.date.slice(5, 7)) - 1, Number(row.date.slice(8, 10))),
+            1,
+          ).year === year &&
+          periodForDate(
+            new Date(Number(row.date.slice(0, 4)), Number(row.date.slice(5, 7)) - 1, Number(row.date.slice(8, 10))),
+            1,
+          ).month === month,
+      );
+      return calculatePeriodTotals(september, rows, new Map([["dt-hourly", hourly]]));
+    };
+
+    const septemberBefore = await totalsFor(2026, 9);
+    expect(septemberBefore.amount).toBe(240);
+    expect(septemberBefore.total_hours).toBe(8);
+
+    renderDay({ date: "2026-08-31" });
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(ru.day.shiftTimesShow) }));
+    type(screen.getByLabelText(ru.day.startTime), "22:00");
+    type(screen.getByLabelText(ru.day.endTime), "06:00");
+    await save();
+
+    // Смена целиком в августе: дата записи не сдвинулась ни на день.
+    await waitFor(async () => {
+      const august = (await db.entries.where("date").equals("2026-08-31").toArray()).filter(
+        (row) => row.deleted_at === null,
+      );
+      expect(august).toHaveLength(1);
+      expect(august[0].hours).toBe(8);
+      expect(august[0].amount).toBe(240);
+    });
+
+    // Сентябрь не изменился ни на грош и ни на час.
+    const septemberAfter = await totalsFor(2026, 9);
+    expect(septemberAfter).toEqual(septemberBefore);
+    expect(await db.entries.where("date").equals("2026-09-01").count()).toBe(1);
+    expect((await db.entries.get("e-september"))).toEqual(SEPTEMBER_ENTRY);
+  });
+});
+
+describe("DayScreen — вывод длительности и снимки (инварианты 8 и 9)", () => {
+  function openShiftTimes() {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(ru.day.shiftTimesShow) }));
+  }
+
+  it("инвариант 8: ручная сумма не двигается от вывода длительности", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    fireEvent.click(screen.getByRole("switch"));
+    type(fields().amount, "500");
+
+    openShiftTimes();
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "12:00");
+
+    // Часы — это факт о смене, и они меняются. Деньги — нет.
+    expect(fields().hours).toHaveValue("4");
+
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(4);
+    expect(entry.amount_override).toBe(500);
+    expect(entry.amount).toBe(500);
+  });
+
+  it("инвариант 9: ручная ставка переживает вывод длительности", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    type(fields().rate, "50");
+
+    openShiftTimes();
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "14:00");
+
+    const entry = await savedEntry();
+    expect(entry.rate_per_hour).toBe(50);
+    expect(entry.rate_is_manual).toBe(true);
+    expect(entry.rate_source).toBe("manual");
+    expect(entry.hours).toBe(6);
+    expect(entry.amount).toBe(300);
   });
 });
 
