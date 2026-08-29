@@ -788,12 +788,14 @@ describe("DayScreen — длительность из времён (раздел
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     openShiftTimes();
 
-    type(screen.getByLabelText(ru.day.startTime), "08:00");
-    type(screen.getByLabelText(ru.day.endTime), "16:00");
+    // 8.5 часа, а не 8: значение по умолчанию типа дня равно восьми, и на нём
+    // тест прошёл бы даже без вывода длительности вовсе.
+    type(screen.getByLabelText(ru.day.startTime), "09:00");
+    type(screen.getByLabelText(ru.day.endTime), "17:30");
 
     const entry = await savedEntry();
-    expect(entry.hours).toBe(8);
-    expect(entry.amount).toBe(240);
+    expect(entry.hours).toBe(8.5);
+    expect(entry.amount).toBe(255);
     expect(entry.duration_is_manual).toBe(false);
   });
 
@@ -816,12 +818,14 @@ describe("DayScreen — длительность из времён (раздел
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     openShiftTimes();
 
+    // Девять часов, а не восемь: на восьми тест совпал бы со значением по
+    // умолчанию типа дня и прошёл бы без всякого перехода через полночь.
     type(screen.getByLabelText(ru.day.startTime), "22:00");
-    type(screen.getByLabelText(ru.day.endTime), "06:00");
+    type(screen.getByLabelText(ru.day.endTime), "07:00");
 
     const entry = await savedEntry();
-    expect(entry.hours).toBe(8);
-    expect(entry.amount).toBe(240);
+    expect(entry.hours).toBe(9);
+    expect(entry.amount).toBe(270);
   });
 
   it("инвариант 28: одинаковые времена дают полные сутки", async () => {
@@ -914,14 +918,22 @@ describe("DayScreen — связь длительности с временам�
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     openShiftTimes();
-    type(screen.getByLabelText(ru.day.startTime), "08:00");
-    type(screen.getByLabelText(ru.day.endTime), "16:00");
-    await waitFor(() => expect(fields().hours).toHaveValue("8"));
+    // 8.5 часа: отличается от default_hours типа дня (8), иначе «связь живая»
+    // нельзя отличить от «связи нет вовсе».
+    type(screen.getByLabelText(ru.day.startTime), "09:00");
+    type(screen.getByLabelText(ru.day.endTime), "17:30");
+    await waitFor(() => expect(fields().hours).toHaveValue("8.5"));
   }
 
   it("правка часов руками рвёт связь, и времена больше её не двигают", async () => {
     await withTimes();
     expect(screen.getByText(ru.day.durationDerived)).toBeVisible();
+
+    // Пока связь жива, перерыв двигает часы — иначе следующая половина теста
+    // не отличала бы разрыв связи от отсутствия вывода вовсе.
+    type(screen.getByLabelText(ru.day.breakMinutes), "30");
+    expect(fields().hours).toHaveValue("8");
+    type(screen.getByLabelText(ru.day.breakMinutes), "");
 
     type(fields().hours, "5");
     expect(screen.getByText(ru.day.durationManual)).toBeVisible();
@@ -944,12 +956,12 @@ describe("DayScreen — связь длительности с временам�
     expect(fields().hours).toHaveValue("5");
 
     fireEvent.click(screen.getByRole("button", { name: ru.day.durationRestoreLink }));
-    expect(fields().hours).toHaveValue("7.5");
+    expect(fields().hours).toHaveValue("8");
 
     const entry = await savedEntry();
     expect(entry.duration_is_manual).toBe(false);
-    expect(entry.hours).toBe(7.5);
-    expect(entry.amount).toBe(225);
+    expect(entry.hours).toBe(8);
+    expect(entry.amount).toBe(240);
   });
 
   it("без времён кнопки восстановления нет — восстанавливать нечего", async () => {
@@ -993,7 +1005,7 @@ describe("DayScreen — связь длительности с временам�
     // Живая связь: часы остаются выведенными из времён, а не откатываются к
     // default_hours нового типа.
     fireEvent.click(screen.getByRole("button", { name: "Ночная смена" }));
-    expect(fields().hours).toHaveValue("8");
+    expect(fields().hours).toHaveValue("8.5");
     expect(screen.getByText(ru.day.durationDerived)).toBeVisible();
 
     // Разорванная связь переживает смену типа: вписанные 5 часов не заменяются
@@ -1057,7 +1069,7 @@ describe("DayScreen — ночная смена на границе период
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(ru.day.shiftTimesShow) }));
     type(screen.getByLabelText(ru.day.startTime), "22:00");
-    type(screen.getByLabelText(ru.day.endTime), "06:00");
+    type(screen.getByLabelText(ru.day.endTime), "07:00");
     await save();
 
     // Смена целиком в августе: дата записи не сдвинулась ни на день.
@@ -1066,8 +1078,8 @@ describe("DayScreen — ночная смена на границе период
         (row) => row.deleted_at === null,
       );
       expect(august).toHaveLength(1);
-      expect(august[0].hours).toBe(8);
-      expect(august[0].amount).toBe(240);
+      expect(august[0].hours).toBe(9);
+      expect(august[0].amount).toBe(270);
     });
 
     // Сентябрь не изменился ни на грош и ни на час.
