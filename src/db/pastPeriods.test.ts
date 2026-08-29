@@ -251,6 +251,29 @@ describe("месяц с записями, превращённый в ручно
     expect(await listManualPeriods(db, USER_ID)).toEqual([]);
   });
 
+  it("смена месяца у такого периода не уносит строку из месяца с записями", async () => {
+    await seedAugustWithEntry();
+    const august = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 8, hours: 10, amount: 999 }, SETTINGS))
+      .period;
+
+    // Человек понял, что вводил не тот месяц, и переставил его на сентябрь.
+    await saveManualPeriod(
+      db,
+      USER_ID,
+      { year: 2026, month: 9, hours: 10, amount: 999, replacingId: august.id },
+      SETTINGS,
+    );
+
+    // Августовская строка обязана остаться на месте со своими числами: перенос
+    // её самой оставил бы август вовсе без периода, и календарь завёл бы его
+    // заново по умолчаниям, потеряв ставку, норму и прочие начисления.
+    const stayed = await db.periods.get("p-aug");
+    expect(stayed).toMatchObject({ year: 2026, month: 8, is_manual: false, base_rate: 33.3, extra_amount: -120.75 });
+    const manual = await listManualPeriods(db, USER_ID);
+    expect(manual.map((row) => `${row.year}-${row.month}`)).toEqual(["2026-9"]);
+    expect(manual[0].closed_totals?.amount).toBe(999);
+  });
+
   it("отмена возвращает ручные итоги той же строке", async () => {
     await seedAugustWithEntry();
     await saveManualPeriod(db, USER_ID, { year: 2026, month: 8, hours: 10, amount: 999 }, SETTINGS);

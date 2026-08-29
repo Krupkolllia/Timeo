@@ -141,9 +141,18 @@ export async function saveManualPeriod(
         ? await db.periods.get(draft.replacingId)
         : undefined;
 
+    // Переносить можно только строку, заведённую ради самих итогов. У месяца с
+    // записями есть собственные ставка, норма и прочие начисления — унеся
+    // строку в другой месяц, мы оставили бы прежний вовсе без периода, и
+    // календарь завёл бы его заново по умолчаниям, потеряв всё это молча.
+    const movable =
+      replaced !== undefined &&
+      replaced.deleted_at === null &&
+      !(await monthHasEntries(db, userId, replaced.year, replaced.month, settings.period_start_day));
+
     // Месяц в форме сменили, а в новом месяце строки ещё нет — переносим ту же
     // строку, а не заводим вторую.
-    if (!existing && replaced && replaced.deleted_at === null) {
+    if (!existing && movable && replaced) {
       const moved: Period = {
         ...replaced,
         year: draft.year,
