@@ -186,6 +186,23 @@ describe("planImport — режимы (инвариант 47)", () => {
     expect(result.counts.periods).toBe(1);
   });
 
+  it("файл с двумя периодами на один месяц не раздваивает месяц", () => {
+    // Выборка периода берёт .first(): две живые строки на один year+month —
+    // это месяц, который навсегда показывает то одни итоги, то другие.
+    const result = plan(
+      file({
+        periods: [
+          makePeriod({ id: "p-late", year: 2026, month: 8, base_rate: 99, created_at: "2026-02-01T00:00:00.000Z" }),
+          makePeriod({ id: "p-early", year: 2026, month: 8, base_rate: 30, created_at: "2026-01-01T00:00:00.000Z" }),
+        ],
+      }),
+      current(),
+      "replace",
+    );
+
+    expect(result.periods.map((row) => row.id)).toEqual(["p-early"]);
+  });
+
   it("merge: два праздника на одну дату законны (инвариант 53)", () => {
     const local = makeHoliday({ id: "h-local", date: "2026-08-15", name: "Успение" });
     const imported = makeHoliday({ id: "h-file", date: "2026-08-15", name: "День фирмы" });

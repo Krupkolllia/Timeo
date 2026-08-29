@@ -215,7 +215,31 @@ export function planImport(input: ImportPlanInput): ImportPlan {
   }
 
   const periods: Period[] = [];
+  // Внутри одного месяца строка может быть только одна: выборка периода берёт
+  // .first(), и две живые строки на один year+month раздваивали бы месяц
+  // навсегда — какая из них выиграет, зависело бы от порядка ключей. Файл с
+  // таким содержимым (правленный руками, записанный сломанной сборкой) не
+  // должен превращаться в неисправимую базу. Побеждает самая ранняя по
+  // created_at, при равенстве — по id: то же правило, что и у праздников на
+  // одну дату (инвариант 53).
+  const importedByMonth = new Map<string, Period>();
   for (const imported of file.periods) {
+    const key = `${imported.year}:${imported.month}`;
+    const rival = importedByMonth.get(key);
+    if (!rival) {
+      importedByMonth.set(key, imported);
+      continue;
+    }
+    const winner =
+      imported.created_at < rival.created_at ||
+      (imported.created_at === rival.created_at && imported.id < rival.id)
+        ? imported
+        : rival;
+    importedByMonth.set(key, winner);
+    counts.skipped++;
+  }
+
+  for (const imported of importedByMonth.values()) {
     const local = localPeriods.get(imported.id);
     if (local && isSameRow(local, imported)) {
       counts.skipped++;

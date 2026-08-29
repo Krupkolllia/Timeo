@@ -117,7 +117,7 @@ export function PastPeriodsPage() {
     try {
       // Ничего не проверяем и ничем не блокируем (инвариант 54): ноль часов,
       // отрицательная сумма и месяц в будущем сохраняются как есть.
-      await saveManualPeriod(
+      const result = await saveManualPeriod(
         db,
         userId,
         {
@@ -129,6 +129,9 @@ export function PastPeriodsPage() {
         },
         settings,
       );
+      // Закрытый месяц не переписан (инвариант 2) — форма остаётся открытой с
+      // объяснением на экране, а не закрывается, будто всё сохранилось.
+      if (result.status === "closed_period") return;
     } finally {
       savingRef.current = false;
     }
@@ -169,7 +172,12 @@ export function PastPeriodsPage() {
   const warnLock =
     draft !== null && draft.editingId === null && !allPeriods.some((period) => period.is_closed);
 
-  const warning = warnExisting
+  // Закрытый обычный месяц: сохранять нечего, пока его не откроют заново.
+  const blockedClosed = Boolean(existingPeriod && existingPeriod.is_closed && !existingPeriod.is_manual);
+
+  const warning = blockedClosed
+    ? ru.pastPeriods.hintClosed
+    : warnExisting
     ? ru.pastPeriods.hintExisting
     : warnFuture
       ? ru.pastPeriods.hintFutureMonth
@@ -312,11 +320,25 @@ export function PastPeriodsPage() {
 
       {/* Основное действие — в нижней части экрана (инвариант 59). */}
       <div className="shrink-0 border-t border-white/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+        {/* Для закрытого месяца кнопка не «сохраняет молча в никуда», а ведёт
+            туда, где период открывают заново, — с возвратом обратно сюда. */}
         <button
           className="min-h-11 w-full rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
-          onClick={() => (draft ? void handleSave() : openForm())}
+          onClick={() => {
+            if (!draft) {
+              openForm();
+              return;
+            }
+            if (blockedClosed) {
+              // Экран периода возвращается по истории браузера, поэтому
+              // return= ему не нужен: «назад» оттуда приведёт обратно сюда.
+              navigate(`/period?year=${draft.year}&month=${draft.month}`);
+              return;
+            }
+            void handleSave();
+          }}
         >
-          {draft ? ru.pastPeriods.save : ru.pastPeriods.add}
+          {draft ? (blockedClosed ? ru.pastPeriods.openPeriod : ru.pastPeriods.save) : ru.pastPeriods.add}
         </button>
       </div>
 

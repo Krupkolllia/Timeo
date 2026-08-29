@@ -23,6 +23,16 @@ export type ManualPeriodSettings = Pick<
   "default_base_rate" | "default_norm_hours" | "period_start_day"
 >;
 
+export type SaveManualPeriodResult =
+  | { status: "saved"; period: Period }
+  /**
+   * Инвариант 2: месяц закрыт и не является ручным — его итоги зафиксированы,
+   * и переписать их отсюда нельзя. Не «тихо ничего не делаем»: экран обязан
+   * сказать, почему, и увести туда, где период открывают заново (инвариант 3 —
+   * это осознанное действие с подтверждением, и оно живёт на экране периода).
+   */
+  | { status: "closed_period"; period: Period };
+
 function nowISO(): string {
   return new Date().toISOString();
 }
@@ -101,7 +111,7 @@ export async function saveManualPeriod(
   userId: string,
   draft: ManualPeriodDraft,
   settings: ManualPeriodSettings,
-): Promise<Period> {
+): Promise<SaveManualPeriodResult> {
   const now = nowISO();
   const closed_totals = {
     amount: draft.amount,
@@ -118,6 +128,14 @@ export async function saveManualPeriod(
     // сохранение месяца, удалённого час назад, правило бы удалённую строку, и
     // на экране это выглядело бы как «кнопка «сохранить» ничего не делает».
     const existing = await findLive(db, userId, draft.year, draft.month);
+
+    // Закрытый обычный месяц не переписывается: в его closed_totals лежит
+    // снимок, снятый при закрытии, и заменить его введёнными числами значило бы
+    // потерять зафиксированный итог без всякого подтверждения.
+    if (existing && existing.is_closed && !existing.is_manual) {
+      return { status: "closed_period", period: existing };
+    }
+
     const replaced =
       draft.replacingId && draft.replacingId !== existing?.id
         ? await db.periods.get(draft.replacingId)
@@ -136,7 +154,7 @@ export async function saveManualPeriod(
         updated_at: now,
       };
       await db.periods.put(moved);
-      return moved;
+      return { status: "saved", period: moved };
     }
 
     // Месяц сменили, и в новом месяце строка уже есть: итоги уезжают в неё, а
@@ -152,7 +170,7 @@ export async function saveManualPeriod(
       // ручной период будет убран.
       const updated: Period = { ...existing, is_manual: true, is_closed: true, closed_totals, updated_at: now };
       await db.periods.put(updated);
-      return updated;
+      return { status: "saved", period: updated };
     }
 
     const period: Period = {
@@ -176,7 +194,7 @@ export async function saveManualPeriod(
       is_manual: true,
     };
     await db.periods.add(period);
-    return period;
+    return { status: "saved", period };
   });
 }
 

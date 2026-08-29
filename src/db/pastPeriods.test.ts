@@ -11,10 +11,11 @@ describe("saveManualPeriod", () => {
   beforeEach(resetDb);
 
   it("исторический месяц сохраняется закрытым, со снимком итогов и без записей (раздел 8.7)", async () => {
-    const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500.5 }, SETTINGS);
+    const result = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500.5 }, SETTINGS);
 
-    expect(period).toMatchObject({ year: 2026, month: 5, is_manual: true, is_closed: true });
-    expect(period.closed_totals).toEqual({ amount: 1500.5, total_hours: 100, norm_hours_covered: 100 });
+    expect(result.status).toBe("saved");
+    expect(result.period).toMatchObject({ year: 2026, month: 5, is_manual: true, is_closed: true });
+    expect(result.period.closed_totals).toEqual({ amount: 1500.5, total_hours: 100, norm_hours_covered: 100 });
     expect(await db.entries.count()).toBe(0);
   });
 
@@ -56,9 +57,9 @@ describe("saveManualPeriod", () => {
     const negative = await saveManualPeriod(db, USER_ID, { year: 2026, month: 3, hours: 8, amount: -500 }, SETTINGS);
     const future = await saveManualPeriod(db, USER_ID, { year: 2099, month: 12, hours: 8, amount: 100 }, SETTINGS);
 
-    expect(zero.closed_totals?.amount).toBe(0);
-    expect(negative.closed_totals?.amount).toBe(-500);
-    expect(future.year).toBe(2099);
+    expect(zero.period.closed_totals?.amount).toBe(0);
+    expect(negative.period.closed_totals?.amount).toBe(-500);
+    expect(future.period.year).toBe(2099);
   });
 
   it("после первого исторического месяца день начала периода заблокирован (инвариант 4)", async () => {
@@ -68,11 +69,51 @@ describe("saveManualPeriod", () => {
   });
 });
 
+describe("закрытый месяц не переписывается ручными итогами (инвариант 2)", () => {
+  beforeEach(resetDb);
+
+  it("сохранение отказывает и не трогает зафиксированный снимок", async () => {
+    await db.periods.add(
+      makePeriod({
+        id: "p-aug",
+        year: 2026,
+        month: 8,
+        is_closed: true,
+        closed_totals: { amount: 4128.72, total_hours: 168, norm_hours_covered: 168 },
+      }),
+    );
+
+    const result = await saveManualPeriod(db, USER_ID, { year: 2026, month: 8, hours: 10, amount: 999 }, SETTINGS);
+
+    expect(result.status).toBe("closed_period");
+    const period = await db.periods.get("p-aug");
+    // Снимок, снятый при закрытии, — единственный итог этого месяца, и он не
+    // может исчезнуть без переоткрытия (инвариант 3).
+    expect(period?.closed_totals).toEqual({ amount: 4128.72, total_hours: 168, norm_hours_covered: 168 });
+    expect(period?.is_manual).toBe(false);
+  });
+
+  it("уже ручной закрытый месяц правится как обычно", async () => {
+    const saved = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS))
+      .period;
+
+    const result = await saveManualPeriod(
+      db,
+      USER_ID,
+      { year: 2026, month: 5, hours: 96, amount: 1450, replacingId: saved.id },
+      SETTINGS,
+    );
+
+    expect(result.status).toBe("saved");
+    expect(result.period.closed_totals?.amount).toBe(1450);
+  });
+});
+
 describe("удаление исторического месяца", () => {
   beforeEach(resetDb);
 
   it("удаление мягкое, месяц исчезает из списка и снова разблокирует день начала периода", async () => {
-    const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const period = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
 
     await removeManualPeriod(db, USER_ID, period, 1);
 
@@ -82,7 +123,7 @@ describe("удаление исторического месяца", () => {
   });
 
   it("отмена возвращает месяц", async () => {
-    const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const period = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
     await removeManualPeriod(db, USER_ID, period, 1);
 
     await restoreManualPeriod(db, USER_ID, period);
@@ -95,7 +136,7 @@ describe("удаление исторического месяца", () => {
   it("если за окно отмены месяц завёлся заново, итоги переносятся в него, а не появляется вторая строка", async () => {
     const settings = makeSettings();
     await db.settings.add(settings);
-    const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const period = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
     await removeManualPeriod(db, USER_ID, period, 1);
     // Пока действовало окно отмены, пользователь пролистал календарь на май.
     const recreated = await getOrCreatePeriod(db, USER_ID, 2026, 5, settings);
@@ -114,10 +155,10 @@ describe("удаление исторического месяца", () => {
   });
 
   it("сохранение месяца, удалённого раньше, заводит его заново, а не правит удалённую строку", async () => {
-    const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const period = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
     await removeManualPeriod(db, USER_ID, period, 1);
 
-    const again = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 8, amount: 200 }, SETTINGS);
+    const again = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 8, amount: 200 }, SETTINGS)).period;
 
     expect(again.id).not.toBe(period.id);
     expect(await listManualPeriods(db, USER_ID)).toHaveLength(1);
@@ -142,7 +183,7 @@ describe("правка месяца у уже сохранённого исто�
   beforeEach(resetDb);
 
   it("смена месяца переносит ту же строку, а не заводит вторую", async () => {
-    const may = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const may = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
 
     // Человек открыл май и понял, что месяц выбран не тот.
     await saveManualPeriod(
@@ -160,7 +201,7 @@ describe("правка месяца у уже сохранённого исто�
   });
 
   it("смена месяца на уже занятый переносит итоги в него и освобождает прежний", async () => {
-    const may = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    const may = (await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS)).period;
     await saveManualPeriod(db, USER_ID, { year: 2026, month: 6, hours: 8, amount: 200 }, SETTINGS);
 
     await saveManualPeriod(

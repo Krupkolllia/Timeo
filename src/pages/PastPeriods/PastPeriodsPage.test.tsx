@@ -162,6 +162,50 @@ describe("PastPeriodsPage — ввод исторического месяца (
   });
 });
 
+describe("PastPeriodsPage — закрытый месяц (инвариант 2)", () => {
+  async function seedClosedAugust() {
+    await seed({
+      periods: [
+        makeRow({
+          id: "p-aug",
+          year: 2026,
+          month: 8,
+          is_closed: true,
+          closed_totals: { amount: 4128.72, total_hours: 168, norm_hours_covered: 168 },
+        }),
+      ],
+    });
+  }
+
+  it("объясняет, почему месяц не переписать, вместо молчаливого отказа", async () => {
+    await seedClosedAugust();
+    renderPage();
+
+    await openForm();
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.month), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.year), { target: { value: "2026" } });
+
+    expect((await screen.findByText(ru.pastPeriods.hintClosed)).className).not.toContain("invisible");
+    // Кнопка не делает вид, что сохраняет: она ведёт туда, где период
+    // открывают заново (инвариант 3).
+    expect(screen.getByRole("button", { name: ru.pastPeriods.openPeriod })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: ru.pastPeriods.save })).not.toBeInTheDocument();
+  });
+
+  it("ведёт на экран периода, ничего не записав", async () => {
+    await seedClosedAugust();
+    renderPage();
+
+    await openForm();
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.month), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.year), { target: { value: "2026" } });
+    fireEvent.click(await screen.findByRole("button", { name: ru.pastPeriods.openPeriod }));
+
+    expect(currentLocation()).toBe("/period?year=2026&month=8");
+    expect((await db.periods.get("p-aug"))?.closed_totals?.amount).toBe(4128.72);
+  });
+});
+
 describe("PastPeriodsPage — именование периодов", () => {
   it("форма показывает тот же месяц, что и строка списка, при period_start_day > 1", async () => {
     // Период с идентификатором «май» при старте 15-го числа и именовании по
