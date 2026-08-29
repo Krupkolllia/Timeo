@@ -216,6 +216,12 @@ export function DayScreen({
     // Черновик уже соответствует этой записи — повторная инициализация затёрла
     // бы то, что пользователь набирает прямо сейчас.
     if (entry && entry.id === draftEntryIdRef.current) return;
+    // Запись создана, её id уже у нас, но useLiveQuery ещё не привёз её в
+    // список: entry на этот кадр undefined. Без этой проверки эффект уходил в
+    // ветку «записи нет» и сбрасывал черновик на значения ПЕРВОГО типа дня —
+    // только что выбранная ночная смена превращалась обратно в обычный день,
+    // а следующая же правка дописывала эти значения в созданную строку.
+    if (!entry && draftEntryIdRef.current !== null) return;
 
     if (entry) {
       setDraft(entryToDraft(entry));
@@ -232,8 +238,12 @@ export function DayScreen({
       setDraft(null);
     }
     draftEntryIdRef.current = entry?.id ?? null;
+    // holiday участвует в значениях по умолчанию (раздел 6.2), а приезжает из
+    // Dexie отдельным запросом — уже после первого черновика. Без него в
+    // зависимостях предзаполненный множитель на праздник оставался бы правилом
+    // выходного или типа дня до первого тапа по кнопке типа.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, date, selectedEntryId]);
+  }, [entry?.id, date, selectedEntryId, holiday?.id]);
 
   const dayType = draft ? dayTypeById.get(draft.day_type_id) : undefined;
 
@@ -516,7 +526,7 @@ export function DayScreen({
       {draft && dayType && (
         <>
           <div>
-            <label className="text-xs text-white/50">{ru.day.hours}</label>
+            <label className="text-xs text-white/50" htmlFor="day-hours">{ru.day.hours}</label>
             <div className="mt-1 flex items-center gap-3">
               {/* 44px, а не 40: меньший размер не добирает до минимальной цели
                   нажатия на телефоне (инвариант 59), а по этим двум кнопкам
@@ -528,6 +538,7 @@ export function DayScreen({
                 −
               </button>
               <NumberInput
+                id="day-hours"
                 className="w-20 rounded-lg bg-white/5 px-2 py-2 text-center text-lg"
                 value={draft.hours}
                 onChange={handleHoursChange}
@@ -554,8 +565,9 @@ export function DayScreen({
           {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
             <div className={`grid grid-cols-2 gap-3 ${isUnpaidWithoutOverride ? "opacity-60" : ""}`}>
               <div>
-                <label className="text-xs text-white/50">{ru.day.multiplier}</label>
+                <label className="text-xs text-white/50" htmlFor="day-multiplier">{ru.day.multiplier}</label>
                 <NumberInput
+                  id="day-multiplier"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.multiplier}
                   onChange={handleMultiplierChange}
@@ -567,8 +579,9 @@ export function DayScreen({
                 </p>
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.rate}</label>
+                <label className="text-xs text-white/50" htmlFor="day-rate">{ru.day.rate}</label>
                 <NumberInput
+                  id="day-rate"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.rate_per_hour}
                   onChange={handleRateChange}
@@ -604,8 +617,9 @@ export function DayScreen({
           {settings.show_shift_times && (
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-white/50">{ru.day.startTime}</label>
+                <label className="text-xs text-white/50" htmlFor="day-start-time">{ru.day.startTime}</label>
                 <input
+                  id="day-start-time"
                   type="time"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
                   value={draft.start_time ?? ""}
@@ -613,8 +627,9 @@ export function DayScreen({
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.endTime}</label>
+                <label className="text-xs text-white/50" htmlFor="day-end-time">{ru.day.endTime}</label>
                 <input
+                  id="day-end-time"
                   type="time"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
                   value={draft.end_time ?? ""}
@@ -622,8 +637,9 @@ export function DayScreen({
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.breakMinutes}</label>
+                <label className="text-xs text-white/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
                 <input
+                  id="day-break-minutes"
                   type="number"
                   inputMode="numeric"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
@@ -669,12 +685,13 @@ export function DayScreen({
           </div>
 
           <div>
-            <label className="text-xs text-white/50">{ru.day.amount}</label>
+            <label className="text-xs text-white/50" htmlFor="day-amount">{ru.day.amount}</label>
             {/* Валюта в одной строке с числом: отдельным <p> в 24px под полем она
                 читалась как ещё одно поле. min-w-0 обязателен — без него flex-элемент
                 с длинным числом не сожмётся и вытолкнет валюту за край. */}
             <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
               <NumberInput
+                id="day-amount"
                 disabled={!isManualAmount}
                 className="min-w-0 flex-1 bg-transparent py-3 text-2xl font-semibold outline-none disabled:opacity-70"
                 value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
@@ -686,8 +703,9 @@ export function DayScreen({
           </div>
 
           <div>
-            <label className="text-xs text-white/50">{ru.day.note}</label>
+            <label className="text-xs text-white/50" htmlFor="day-note">{ru.day.note}</label>
             <textarea
+              id="day-note"
               className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-sm"
               placeholder={ru.day.notePlaceholder}
               value={draft.note}
