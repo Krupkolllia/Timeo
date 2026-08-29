@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 interface NumberInputProps {
+  /** Связь с <label htmlFor>: без неё поле на экране дня доступно только на ощупь. */
+  id?: string;
   value: number;
   onChange: (value: number) => void;
   className?: string;
@@ -19,7 +21,7 @@ const IN_PROGRESS_NUMBER = /^-?(0|[1-9]\d*)?(\.\d*)?$/;
 // "0" before the user can finish typing a decimal or a negative number. This
 // keeps its own text buffer and only reformats it when the value changes for a
 // reason other than the user's own typing (e.g. tapping a different day type).
-export function NumberInput({ value, onChange, className, inputMode = "decimal", disabled }: NumberInputProps) {
+export function NumberInput({ id, value, onChange, className, inputMode = "decimal", disabled }: NumberInputProps) {
   const [text, setText] = useState(String(value));
 
   useEffect(() => {
@@ -29,6 +31,7 @@ export function NumberInput({ value, onChange, className, inputMode = "decimal",
 
   return (
     <input
+      id={id}
       type="text"
       inputMode={inputMode}
       disabled={disabled}
@@ -36,7 +39,12 @@ export function NumberInput({ value, onChange, className, inputMode = "decimal",
       value={text}
       onFocus={(e) => e.target.select()}
       onChange={(e) => {
-        const next = e.target.value;
+        // На русской и польской раскладке iOS десятичная клавиша на цифровой
+        // панели — запятая, а не точка. Без этой замены «8,5» не проходит
+        // проверку ниже, поле молча откатывается, и единственный способ ввести
+        // дробное число выглядит как сломанная клавиатура. Раздел 9: пассивное
+        // бездействие без объяснения — тот же запрет, только незаметный.
+        const next = e.target.value.replace(",", ".");
         if (!IN_PROGRESS_NUMBER.test(next)) {
           // Rejecting by simply not calling setText leaves this controlled
           // input's real DOM value at whatever the browser just wrote (e.g. a

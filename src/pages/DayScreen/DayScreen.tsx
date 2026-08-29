@@ -166,7 +166,19 @@ export function DayScreen({
   // видят entry === undefined и оба создают строку, задваивая запись за день.
   const entryIdRef = useRef<string | null>(entry?.id ?? null);
   const creatingRef = useRef<Promise<Entry | null> | null>(null);
+
+  // Поколение черновика. «Добавить запись» начинает новую строку, и всё, что
+  // относилось к предыдущей, обязано перестать на неё влиять: уже отправленный
+  // createEntry не должен присвоить свой id новому черновику, а эффект
+  // синхронизации ниже — вернуть id старой записи.
+  const draftGenerationRef = useRef(0);
+
   useEffect(() => {
+    // Пока создание записи в полёте, entry всё ещё показывает прежний состав
+    // дня. Возврат сюда его id уводил бы следующую правку в чужую строку:
+    // после «Добавить запись» выбранной снова становится entries[0], и
+    // набранное для новой записи затирало бы первую запись дня без отмены.
+    if (creatingRef.current) return;
     entryIdRef.current = entry?.id ?? null;
   }, [entry?.id]);
 
@@ -188,6 +200,8 @@ export function DayScreen({
   useEffect(() => {
     hasEditedRef.current = false;
     draftEntryIdRef.current = null;
+    draftGenerationRef.current += 1;
+    creatingRef.current = null;
     setSelectedEntryId(null);
   }, [date]);
 
@@ -202,6 +216,12 @@ export function DayScreen({
     // Черновик уже соответствует этой записи — повторная инициализация затёрла
     // бы то, что пользователь набирает прямо сейчас.
     if (entry && entry.id === draftEntryIdRef.current) return;
+    // Запись создана, её id уже у нас, но useLiveQuery ещё не привёз её в
+    // список: entry на этот кадр undefined. Без этой проверки эффект уходил в
+    // ветку «записи нет» и сбрасывал черновик на значения ПЕРВОГО типа дня —
+    // только что выбранная ночная смена превращалась обратно в обычный день,
+    // а следующая же правка дописывала эти значения в созданную строку.
+    if (!entry && draftEntryIdRef.current !== null) return;
 
     if (entry) {
       setDraft(entryToDraft(entry));
@@ -218,13 +238,21 @@ export function DayScreen({
       setDraft(null);
     }
     draftEntryIdRef.current = entry?.id ?? null;
+    // holiday участвует в значениях по умолчанию (раздел 6.2), а приезжает из
+    // Dexie отдельным запросом — уже после первого черновика. Без него в
+    // зависимостях предзаполненный множитель на праздник оставался бы правилом
+    // выходного или типа дня до первого тапа по кнопке типа.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, date, selectedEntryId]);
+  }, [entry?.id, date, selectedEntryId, holiday?.id]);
 
   const dayType = draft ? dayTypeById.get(draft.day_type_id) : undefined;
 
   async function persist(next: EntryDraft) {
     setDraft(next);
+    // Поколение фиксируем до первого await: пока идёт запись в Dexie,
+    // пользователь успевает нажать «Добавить запись», и продолжение этого
+    // вызова относится уже к прошлой строке.
+    const generation = draftGenerationRef.current;
 
     if (entryIdRef.current) {
       await updateEntry(db, entryIdRef.current, next);
@@ -235,7 +263,7 @@ export function DayScreen({
       // Создание уже в полёте (предыдущий вызов persist ещё не резолвился) —
       // дожидаемся его и обновляем ту же строку вместо второй вставки.
       const created = await creatingRef.current;
-      if (!created) return;
+      if (!created || generation !== draftGenerationRef.current) return;
       entryIdRef.current = created.id;
       draftEntryIdRef.current = created.id;
       await updateEntry(db, created.id, next);
@@ -245,6 +273,11 @@ export function DayScreen({
     const promise = createEntry(db, { ...next, user_id: userId, date });
     creatingRef.current = promise;
     const created = await promise;
+    // Черновик успел смениться на новую строку — этот результат к ней не
+    // относится, и присваивать его id значило бы направить следующую правку
+    // в уже созданную запись. creatingRef при этом не трогаем: он принадлежит
+    // новому поколению.
+    if (generation !== draftGenerationRef.current) return;
     creatingRef.current = null;
     // null — период закрыли, пока запись создавалась, и слой данных отказал
     // (инвариант 2). Возвращать черновик не нужно: useLiveQuery уже везёт
@@ -332,6 +365,7 @@ export function DayScreen({
     creatingRef.current = null;
     draftEntryIdRef.current = null;
     hasEditedRef.current = false;
+    draftGenerationRef.current += 1;
     const defaults = buildEntryDefaultsForDayType(
       parsedDate,
       activeDayTypes[0],
@@ -353,6 +387,7 @@ export function DayScreen({
     const remaining = (entries ?? []).filter((e) => e.id !== deleted.id);
     entryIdRef.current = null;
     draftEntryIdRef.current = null;
+    draftGenerationRef.current += 1;
     if (remaining.length === 0) {
       onClose();
       return;
@@ -491,21 +526,25 @@ export function DayScreen({
       {draft && dayType && (
         <>
           <div>
-            <label className="text-xs text-white/50">{ru.day.hours}</label>
+            <label className="text-xs text-white/50" htmlFor="day-hours">{ru.day.hours}</label>
             <div className="mt-1 flex items-center gap-3">
+              {/* 44px, а не 40: меньший размер не добирает до минимальной цели
+                  нажатия на телефоне (инвариант 59), а по этим двум кнопкам
+                  часы правятся чаще всего. */}
               <button
-                className="h-10 w-10 rounded-full bg-white/10 text-lg active:bg-white/20"
+                className="h-11 w-11 rounded-full bg-white/10 text-lg active:bg-white/20"
                 onClick={() => handleHoursChange(Math.max(0, draft.hours - 0.5))}
               >
                 −
               </button>
               <NumberInput
+                id="day-hours"
                 className="w-20 rounded-lg bg-white/5 px-2 py-2 text-center text-lg"
                 value={draft.hours}
                 onChange={handleHoursChange}
               />
               <button
-                className="h-10 w-10 rounded-full bg-white/10 text-lg active:bg-white/20"
+                className="h-11 w-11 rounded-full bg-white/10 text-lg active:bg-white/20"
                 onClick={() => handleHoursChange(draft.hours + 0.5)}
               >
                 +
@@ -526,8 +565,9 @@ export function DayScreen({
           {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
             <div className={`grid grid-cols-2 gap-3 ${isUnpaidWithoutOverride ? "opacity-60" : ""}`}>
               <div>
-                <label className="text-xs text-white/50">{ru.day.multiplier}</label>
+                <label className="text-xs text-white/50" htmlFor="day-multiplier">{ru.day.multiplier}</label>
                 <NumberInput
+                  id="day-multiplier"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.multiplier}
                   onChange={handleMultiplierChange}
@@ -539,8 +579,9 @@ export function DayScreen({
                 </p>
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.rate}</label>
+                <label className="text-xs text-white/50" htmlFor="day-rate">{ru.day.rate}</label>
                 <NumberInput
+                  id="day-rate"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
                   value={draft.rate_per_hour}
                   onChange={handleRateChange}
@@ -576,8 +617,9 @@ export function DayScreen({
           {settings.show_shift_times && (
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-white/50">{ru.day.startTime}</label>
+                <label className="text-xs text-white/50" htmlFor="day-start-time">{ru.day.startTime}</label>
                 <input
+                  id="day-start-time"
                   type="time"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
                   value={draft.start_time ?? ""}
@@ -585,8 +627,9 @@ export function DayScreen({
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.endTime}</label>
+                <label className="text-xs text-white/50" htmlFor="day-end-time">{ru.day.endTime}</label>
                 <input
+                  id="day-end-time"
                   type="time"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
                   value={draft.end_time ?? ""}
@@ -594,8 +637,9 @@ export function DayScreen({
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50">{ru.day.breakMinutes}</label>
+                <label className="text-xs text-white/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
                 <input
+                  id="day-break-minutes"
                   type="number"
                   inputMode="numeric"
                   className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
@@ -615,30 +659,39 @@ export function DayScreen({
 
           <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
             <span className="text-sm">{ru.day.manualAmountToggle}</span>
+            {/* Область нажатия 44px по высоте, дорожка внутри остаётся 24px:
+                сам переключатель ростом с дорожку — цель в 24px, вдвое меньше
+                минимальной (инвариант 59). -my-2 съедает добавленную высоту,
+                чтобы строка не растолстела. */}
             <button
               role="switch"
               aria-checked={isManualAmount}
               onClick={() => handleToggleManualAmount(!isManualAmount)}
-              className={`relative h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
+              className="-my-2 flex h-11 w-11 items-center justify-end"
             >
-              {/* Absolute + left, not transform — a translate-based knob depends on the
-                  button not being a flex/centered container; absolute positioning against
-                  an explicit `relative` parent has no such ambiguity. */}
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-[left] ${
-                  isManualAmount ? "left-[22px]" : "left-0.5"
-                }`}
-              />
+                className={`relative block h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
+              >
+                {/* Absolute + left, not transform — a translate-based knob depends on the
+                    parent not being a flex/centered container; absolute positioning against
+                    an explicit `relative` parent has no such ambiguity. */}
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-[left] ${
+                    isManualAmount ? "left-[22px]" : "left-0.5"
+                  }`}
+                />
+              </span>
             </button>
           </div>
 
           <div>
-            <label className="text-xs text-white/50">{ru.day.amount}</label>
+            <label className="text-xs text-white/50" htmlFor="day-amount">{ru.day.amount}</label>
             {/* Валюта в одной строке с числом: отдельным <p> в 24px под полем она
                 читалась как ещё одно поле. min-w-0 обязателен — без него flex-элемент
                 с длинным числом не сожмётся и вытолкнет валюту за край. */}
             <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
               <NumberInput
+                id="day-amount"
                 disabled={!isManualAmount}
                 className="min-w-0 flex-1 bg-transparent py-3 text-2xl font-semibold outline-none disabled:opacity-70"
                 value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
@@ -650,8 +703,9 @@ export function DayScreen({
           </div>
 
           <div>
-            <label className="text-xs text-white/50">{ru.day.note}</label>
+            <label className="text-xs text-white/50" htmlFor="day-note">{ru.day.note}</label>
             <textarea
+              id="day-note"
               className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-sm"
               placeholder={ru.day.notePlaceholder}
               value={draft.note}

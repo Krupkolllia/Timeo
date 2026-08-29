@@ -1,6 +1,85 @@
 import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
 import { TimeoDB } from "@/db/schema";
+import { roundMoney } from "@/lib/calc/round";
+
+const LEGACY_STORES = {
+  settings: "id, user_id",
+  periods: "id, user_id, [year+month]",
+  day_types: "id, user_id, sort_order",
+  entries: "id, user_id, date, day_type_id",
+  holidays: "id, user_id, date",
+};
+
+function legacySettings(patch: Record<string, unknown> = {}) {
+  return {
+    id: "s1",
+    user_id: "user-1",
+    created_at: "",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    deleted_at: null,
+    currency: "PLN",
+    period_start_day: 1,
+    period_naming: "end_month",
+    default_hours: 8,
+    theme: "system",
+    show_shift_times: false,
+    reminder_enabled: false,
+    reminder_time: null,
+    week_starts_on: "monday",
+    weekend_multipliers: { saturday: 1, sunday: 1, holiday: 1 },
+    default_base_rate: 30,
+    default_norm_hours: 160,
+    default_base_rate_from_period: null,
+    preferred_rate_change_mode: null,
+    ...patch,
+  };
+}
+
+function legacyPeriod(patch: Record<string, unknown> = {}) {
+  return {
+    id: "p1",
+    user_id: "user-1",
+    created_at: "",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    deleted_at: null,
+    year: 2026,
+    month: 8,
+    base_rate: 30,
+    norm_hours: 160,
+    extra_amount: 0,
+    extra_note: "",
+    is_closed: false,
+    closed_totals: null,
+    is_manual: false,
+    ...patch,
+  };
+}
+
+function legacyEntry(patch: Record<string, unknown> = {}) {
+  return {
+    id: "e1",
+    user_id: "user-1",
+    created_at: "",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    deleted_at: null,
+    date: "2026-08-10",
+    day_type_id: "dt-1",
+    hours: 8,
+    multiplier: 1,
+    rate_per_hour: 30,
+    rate_is_manual: false,
+    amount: 240,
+    amount_override: null,
+    start_time: null,
+    end_time: null,
+    break_minutes: null,
+    note: "",
+    rate_source: "period_base",
+    ...patch,
+  };
+}
+
 
 let dbName: string | undefined;
 
@@ -126,6 +205,289 @@ describe("TimeoDB schema migration", () => {
     // Ставка и всё остальное не тронуты — миграция только дописывает поле.
     expect(settings?.default_base_rate).toBe(30);
     expect(settings?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("rewrites the multiplier to 1 on manual-rate entries stored under the old formula", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    // Старая форма: человек вписал ставку 50 при базовой 30, старый код вывел
+    // из неё множитель 50 / 30 = 1.667 и посчитал сумму как 8 × 50.
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "manual",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 400,
+        rate_source: "manual",
+      }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entry = await upgraded.entries.get("manual");
+    // Сумма сохранена в точности, вписанная ставка не тронута, множитель
+    // больше не удваивает коэффициент.
+    expect(entry?.amount).toBe(400);
+    expect(entry?.rate_per_hour).toBe(50);
+    expect(entry?.multiplier).toBe(1);
+    // И теперь запись согласована с новой формулой: правка любого поля даёт ту
+    // же сумму, а не 8 × 50 × 1.667 = 666.80.
+    expect(roundMoney(entry!.hours * entry!.rate_per_hour * entry!.multiplier)).toBe(400);
+    expect(entry?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("restores the stored rate on auto-rate entries without changing their amount", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    // Старая форма: ночная смена ×1.5 при базовой 30 — ставка сохранена как
+    // 45, сумма как 8 × 45.
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "auto",
+        hours: 8,
+        multiplier: 1.5,
+        rate_per_hour: 45,
+        rate_is_manual: false,
+        amount: 360,
+        rate_source: "day_type_default",
+      }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entry = await upgraded.entries.get("auto");
+    expect(entry?.amount).toBe(360);
+    expect(entry?.multiplier).toBe(1.5);
+    // Ставка снова та, что показывает поле «ставка за час», и строка
+    // расшифровки «8ч × 30.00 · ×1.5» наконец даёт свою же сумму.
+    expect(entry?.rate_per_hour).toBe(30);
+    expect(entry?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
+  it("leaves entries inside a closed period untouched", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(
+      legacyPeriod({
+        base_rate: 30,
+        is_closed: true,
+        closed_totals: { amount: 400, total_hours: 8, norm_hours_covered: 8 },
+      }),
+    );
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "closed",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 400,
+        rate_source: "manual",
+      }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entry = await upgraded.entries.get("closed");
+    expect(entry?.multiplier).toBe(1.667);
+    expect(entry?.amount).toBe(400);
+
+    upgraded.close();
+  });
+
+  it("leaves entries already written under the new formula alone", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    // Новая форма: 8 × 50 × 2 = 800. Множитель здесь работает, и обнулять его
+    // значило бы урезать сумму вдвое.
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "new-shape",
+        hours: 8,
+        multiplier: 2,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 800,
+        rate_source: "manual",
+      }),
+    );
+    // amount_override сумма задана человеком целиком (инвариант 8).
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "override",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 400,
+        amount_override: 400,
+        rate_source: "manual",
+      }),
+    );
+    // Не сходится ни по одной формуле — форму записи не опознали.
+    await legacy.table("entries").add(
+      legacyEntry({
+        id: "unknown",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 123.45,
+        rate_source: "manual",
+      }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.entries.get("new-shape"))?.multiplier).toBe(2);
+    expect((await upgraded.entries.get("new-shape"))?.amount).toBe(800);
+    expect((await upgraded.entries.get("override"))?.multiplier).toBe(1.667);
+    expect((await upgraded.entries.get("unknown"))?.multiplier).toBe(1.667);
+    expect((await upgraded.entries.get("unknown"))?.amount).toBe(123.45);
+
+    upgraded.close();
+  });
+
+  it("keeps the period total equal to the sum of its entries across the upgrade", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    await legacy.table("entries").bulkAdd([
+      legacyEntry({ id: "a", date: "2026-08-03", hours: 8, multiplier: 1.667, rate_per_hour: 50, rate_is_manual: true, amount: 400, rate_source: "manual" }),
+      legacyEntry({ id: "b", date: "2026-08-04", hours: 8, multiplier: 1.5, rate_per_hour: 45, rate_is_manual: false, amount: 360, rate_source: "day_type_default" }),
+      legacyEntry({ id: "c", date: "2026-08-05", hours: 8, multiplier: 1, rate_per_hour: 30, rate_is_manual: false, amount: 240, rate_source: "period_base" }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entries = await upgraded.entries.toArray();
+    expect(roundMoney(entries.reduce((sum, e) => sum + e.amount, 0))).toBe(1000);
+    // И каждая строка теперь считается по новой формуле в свою же сумму.
+    for (const e of entries) {
+      expect(roundMoney(e.hours * e.rate_per_hour * e.multiplier)).toBe(e.amount);
+    }
+
+    upgraded.close();
+  });
+
+  it("defaults a missing period_start_day and survives a malformed entry date", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    // Строка настроек, записанная ещё до появления поля.
+    const settings = legacySettings();
+    delete (settings as Record<string, unknown>).period_start_day;
+    await legacy.table("settings").add(settings);
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    await legacy.table("entries").bulkAdd([
+      legacyEntry({ id: "ok", hours: 8, multiplier: 1.667, rate_per_hour: 50, rate_is_manual: true, amount: 400 }),
+      // Дата, из которой период не вывести: миграция обязана не считать такую
+      // запись закрытой и не падать на ней.
+      legacyEntry({
+        id: "broken-date",
+        date: "не-дата",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 400,
+      }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.entries.get("ok"))?.multiplier).toBe(1);
+    expect((await upgraded.entries.get("broken-date"))?.multiplier).toBe(1);
+
+    upgraded.close();
+  });
+
+  it("leaves an auto-rate entry alone when the period base rate no longer reconciles", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    // Базовая ставка периода с тех пор изменилась: подставлять её в запись
+    // задним числом значило бы придумать число, которого там не было.
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 50 }));
+    await legacy.table("entries").add(
+      legacyEntry({ id: "auto", hours: 8, multiplier: 1.5, rate_per_hour: 45, rate_is_manual: false, amount: 360 }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entry = await upgraded.entries.get("auto");
+    expect(entry?.rate_per_hour).toBe(45);
+    expect(entry?.amount).toBe(360);
+
+    upgraded.close();
+  });
+
+  it("leaves an auto-rate entry alone when its period row is missing", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("entries").add(
+      legacyEntry({ id: "auto", hours: 8, multiplier: 1.5, rate_per_hour: 45, rate_is_manual: false, amount: 360 }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.entries.get("auto"))?.rate_per_hour).toBe(45);
 
     upgraded.close();
   });

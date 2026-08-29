@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from "dexie";
 import type { Settings, Period, DayType, Entry, Holiday } from "@/types/models";
 import { roundHours, roundMoney, roundMultiplier } from "@/lib/calc/round";
+import { periodForDate } from "@/lib/calc/period";
 
 export class TimeoDB extends Dexie {
   settings!: EntityTable<Settings, "id">;
@@ -58,5 +59,92 @@ export class TimeoDB extends Dexie {
           settings.default_base_rate_from_period = settings.default_base_rate_from_period ?? null;
         }),
     );
+    // Записи, созданные до 4cc25c5, лежат в базе по СТАРОЙ формуле:
+    //
+    //     rate_per_hour = base_rate × multiplier   (множитель свёрнут в ставку)
+    //     amount        = hours × rate_per_hour
+    //
+    // Новая формула (раздел 6.4) применяет множитель отдельно:
+    //
+    //     amount = hours × rate × multiplier
+    //
+    // Для rate_is_manual = false это безобидно: ставка заново выводится из
+    // period.base_rate при каждом расчёте, и сумма получается той же самой.
+    // Расходится только сохранённое rate_per_hour — на экране дня и в
+    // расшифровке периода видна ставка 45 при базовой 30, и строка
+    // «8ч × 45.00 · ×1.5» противоречит собственной сумме 360 (инвариант 55).
+    //
+    // Для rate_is_manual = true всё хуже. Старый код выводил из вписанной
+    // ставки ещё и множитель (multiplier = rate ÷ base_rate), так что оба поля
+    // несут один и тот же коэффициент. Новая формула умножает на него второй
+    // раз: 8ч × 50 = 400 превращается в 8 × 50 × 1.667 = 666.80 при первом же
+    // касании любого поля. Множитель в таких записях в сумме не участвовал
+    // никогда, поэтому честное значение для него — 1: сумма сохраняется точно,
+    // вписанная человеком ставка остаётся нетронутой, а строка расшифровки
+    // впервые совпадает с суммой.
+    //
+    // Правится только то, что однозначно опознано как старая форма: сумма не
+    // сходится по новой формуле И сходится по старой. Записи с amount_override,
+    // записи новой формы и всё, что не подошло ни под одну из двух формул,
+    // не трогаются вовсе.
+    //
+    // Закрытые периоды не трогаются (инвариант 2): их итоги и так берутся из
+    // closed_totals, а зафиксированный месяц неизменяем по определению.
+    //
+    // updated_at, как и в version(3)/version(4), намеренно не трогаем: иначе
+    // при появлении синхронизации (блок 8) вся база разом уедет в облако как
+    // «изменённая».
+    this.version(5).upgrade(async (tx) => {
+      const settingsRows = (await tx.table("settings").toArray()) as Settings[];
+      const periods = (await tx.table("periods").toArray()) as Period[];
+
+      const startDayByUser = new Map<string, number>();
+      for (const row of settingsRows) startDayByUser.set(row.user_id, row.period_start_day ?? 1);
+
+      const periodKey = (userId: string, year: number, month: number) => `${userId}:${year}:${month}`;
+      const periodByKey = new Map<string, Period>();
+      for (const period of periods) periodByKey.set(periodKey(period.user_id, period.year, period.month), period);
+
+      const periodOfEntry = (entry: Entry): Period | undefined => {
+        // Дату разбираем вручную: new Date("2026-08-10") — это UTC-полночь
+        // (инвариант 27).
+        const [year, month, day] = entry.date.split("-").map(Number);
+        if (!year || !month || !day) return undefined;
+        const startDay = startDayByUser.get(entry.user_id) ?? 1;
+        const id = periodForDate(new Date(year, month - 1, day), startDay);
+        return periodByKey.get(periodKey(entry.user_id, id.year, id.month));
+      };
+
+      await tx
+        .table("entries")
+        .toCollection()
+        .modify((entry: Entry) => {
+          if (entry.amount_override !== null && entry.amount_override !== undefined) return;
+
+          // Уже по новой формуле (в том числе любая запись с множителем 1) —
+          // трогать нечего.
+          if (roundMoney(entry.hours * entry.rate_per_hour * entry.multiplier) === entry.amount) return;
+          // Не сходится и по старой — форму записи мы не опознали, и гадать на
+          // платёжном журнале нельзя.
+          if (roundMoney(entry.hours * entry.rate_per_hour) !== entry.amount) return;
+
+          const period = periodOfEntry(entry);
+          if (period?.is_closed) return;
+
+          if (entry.rate_is_manual) {
+            entry.multiplier = 1;
+            return;
+          }
+
+          // Автоматическая ставка: сумма и так пересчитается верно, чинить надо
+          // только само сохранённое число. Меняем его, лишь если это делает
+          // запись согласованной — иначе базовая ставка периода с тех пор
+          // изменилась, и подставлять её задним числом нельзя.
+          if (!period) return;
+          const baseRate = roundMoney(period.base_rate);
+          if (roundMoney(entry.hours * baseRate * entry.multiplier) !== entry.amount) return;
+          entry.rate_per_hour = baseRate;
+        });
+    });
   }
 }

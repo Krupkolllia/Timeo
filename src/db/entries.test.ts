@@ -214,4 +214,12 @@ describe("защита закрытого периода", () => {
 
     expect(february).not.toBeNull();
   });
+
+  it("правка несуществующей записи молча ничего не делает", async () => {
+    // Запись могла быть удалена на другом устройстве между рендером и правкой:
+    // падать здесь нечем, но и создавать строку из патча нельзя.
+    const database = openDb();
+    await expect(updateEntry(database, "нет-такой-записи", { hours: 5 })).resolves.toBeUndefined();
+    expect(await database.entries.count()).toBe(0);
+  });
 });
