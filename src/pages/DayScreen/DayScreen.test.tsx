@@ -732,11 +732,18 @@ describe("DayScreen — ряд типов дня (раздел 8.2)", () => {
 
     // 55 zł/h принадлежала прежнему типу дня. Остаться она не может: как
     // ручная ставка она пережила бы даже смену базовой ставки периода.
-    await waitFor(() => expect(fields().rate).toHaveValue("30"));
-    const stored = await onlyEntry();
-    expect(stored.rate_is_manual).toBe(false);
-    expect(stored.rate_source).toBe("period_base");
-    expect(stored.amount).toBe(180); // 6 × 30
+    //
+    // Ждём именно базу, а не поле: persist() вызывает setDraft синхронно, ДО
+    // записи в Dexie, поэтому поле показывает 30 в тот момент, когда в строке
+    // ещё лежат прежние деньги. Проверка поля с последующим чтением базы
+    // проходила бы на быстрой машине и падала под нагрузкой.
+    await waitFor(async () => {
+      const stored = await onlyEntry();
+      expect(stored.rate_is_manual).toBe(false);
+      expect(stored.rate_source).toBe("period_base");
+      expect(stored.amount).toBe(180); // 6 × 30
+      expect(stored.rate_per_hour).toBe(30);
+    });
   });
 
   it("тип со своей ставкой не получает воскресный множитель и объясняет почему", async () => {

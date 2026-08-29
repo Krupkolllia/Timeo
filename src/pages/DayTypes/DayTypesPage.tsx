@@ -66,19 +66,33 @@ export function DayTypesPage() {
     () => (periodStartDay === undefined ? null : periodForDate(new Date(), periodStartDay)),
     [periodStartDay],
   );
-  // ?? null — потому что useLiveQuery отдаёт undefined и пока читает, и когда
-  // строки нет, а для формы это разные вещи: «периода нет» рисует подсказку
-  // инварианта 22 вместо предпросмотра ставки. Без различения форма на кадр
-  // показывала подсказку «базовая ставка не задана» и подменяла её
-  // предпросмотром — скачок вёрстки ровно там, где пользователь читает число.
-  const period = useLiveQuery(
-    async () =>
-      current
-        ? ((await db.periods.where("[user_id+year+month]").equals([userId, current.year, current.month]).first()) ??
-          null)
-        : null,
+  // Результат несёт год и месяц, для которых он получен, и это не украшение.
+  // Для формы «период ещё читается» и «периода нет» — разные вещи: второе
+  // рисует подсказку инварианта 22 вместо предпросмотра ставки. Отличить их по
+  // одному лишь undefined нельзя дважды:
+  //
+  //  - сам запрос отдаёт undefined и пока читает, и когда строки нет;
+  //  - useLiveQuery СОХРАНЯЕТ прежний результат, пока перезапускается после
+  //    смены зависимости. На первом рендере current ещё null, результат — null,
+  //    и когда settings приезжают и current становится настоящим, форма кадр
+  //    видит этот устаревший null и показывает «базовая ставка не задана» на
+  //    периоде, где ставка задана.
+  //
+  // Поэтому «готово» — это не «не undefined», а «ответ относится к тому
+  // периоду, который мы сейчас показываем».
+  const periodResult = useLiveQuery(
+    async () => {
+      if (!current) return null;
+      const row =
+        (await db.periods.where("[user_id+year+month]").equals([userId, current.year, current.month]).first()) ?? null;
+      return { year: current.year, month: current.month, row };
+    },
     [current],
   );
+  const period =
+    current && periodResult && periodResult.year === current.year && periodResult.month === current.month
+      ? periodResult.row
+      : undefined;
 
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [deleteBlockedId, setDeleteBlockedId] = useState<string | null>(null);
