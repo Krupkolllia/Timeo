@@ -327,19 +327,25 @@ describe("CalendarPage — отмена удаления (раздел 9)", () =
     fireEvent.click(dayCell("2026-08-10"));
     fireEvent.click(await screen.findByRole("button", { name: ru.day.deleteEntry }));
     await screen.findByText(ru.day.deletedNotice);
+    const afterFirstDelete = vi.getTimerCount();
 
-    await vi.advanceTimersByTimeAsync(3000);
     fireEvent.click(dayCell("2026-08-11"));
     fireEvent.click(await screen.findByRole("button", { name: ru.day.deleteEntry }));
-    await screen.findByText(ru.day.deletedNotice);
+    // Ждём завершения именно ВТОРОГО удаления: плашка отмены у обоих
+    // одинаковая, и findByText нашёл бы ещё первую — дальше «отменить»
+    // возвращало бы запись прошлого дня. Опустевший день закрывает шторку, и
+    // это единственный признак в разметке, привязанный ко второму удалению.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: ru.day.deleteEntry })).not.toBeInTheDocument(),
+    );
 
-    // Таймер первой плашки сброшен: её остаток — 2 секунды, и если бы он
-    // продолжал идти, окно закрылось бы. Промотка чуть больше остатка, а не на
-    // те же 3 секунды: с shouldAdvanceTime реальное время тоже идёт в зачёт
+    // Таймер первой плашки сброшен, а не идёт вторым: считаем сами таймеры, а
+    // не смотрим на часы. Прежняя проверка промотала время и ждала, что плашка
+    // ещё на экране, — но с shouldAdvanceTime реальное время тоже идёт в зачёт
     // таймеру, и под нагрузкой (полный прогон, CI) секунды между кликами
-    // съедали новое пятисекундное окно целиком — тест падал на ровном месте.
-    await vi.advanceTimersByTimeAsync(2500);
-    expect(screen.getByText(ru.day.deletedNotice)).toBeInTheDocument();
+    // съедали окно отмены целиком. Тест падал на ровном месте примерно раз на
+    // десять прогонов и на main тоже.
+    expect(vi.getTimerCount()).toBe(afterFirstDelete);
 
     fireEvent.click(screen.getByRole("button", { name: ru.day.undo }));
     await waitFor(async () => expect((await db.entries.get("e-2"))?.deleted_at).toBeNull());

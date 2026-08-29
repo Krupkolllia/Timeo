@@ -162,6 +162,49 @@ describe("PastPeriodsPage — ввод исторического месяца (
   });
 });
 
+describe("PastPeriodsPage — именование периодов", () => {
+  it("форма показывает тот же месяц, что и строка списка, при period_start_day > 1", async () => {
+    // Период с идентификатором «май» при старте 15-го числа и именовании по
+    // месяцу окончания называется июнем.
+    await seed({
+      settings: { period_start_day: 15, period_naming: "end_month" },
+      periods: [
+        makeRow({
+          id: "p-manual",
+          year: 2026,
+          month: 5,
+          is_manual: true,
+          is_closed: true,
+          closed_totals: { amount: 1500, total_hours: 100, norm_hours_covered: 100 },
+        }),
+      ],
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: `${ru.pastPeriods.edit}: Июнь 2026` }));
+
+    expect((await screen.findByLabelText(ru.pastPeriods.month)) as HTMLSelectElement).toHaveValue("6");
+  });
+
+  it("выбранный в форме месяц сохраняется под правильным идентификатором", async () => {
+    await seed({ settings: { period_start_day: 15, period_naming: "end_month" } });
+    renderPage();
+
+    await openForm();
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.month), { target: { value: "6" } });
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.year), { target: { value: "2026" } });
+    typeInto(ru.pastPeriods.hours, "100");
+    fireEvent.click(screen.getByRole("button", { name: ru.pastPeriods.save }));
+
+    // Идентификатор — май, а на экране всё это время июнь.
+    await waitFor(async () => {
+      const rows = await db.periods.filter((row) => row.is_manual).toArray();
+      expect(rows.map((row) => `${row.year}-${row.month}`)).toEqual(["2026-5"]);
+    });
+    expect(await screen.findByText(/Июнь 2026/)).toBeInTheDocument();
+  });
+});
+
 describe("PastPeriodsPage — правка и удаление", () => {
   it("тап по строке открывает форму с её числами и правит тот же период", async () => {
     await seed({
@@ -209,6 +252,65 @@ describe("PastPeriodsPage — правка и удаление", () => {
 
     expect(await screen.findByLabelText(ru.pastPeriods.hours)).toBeInTheDocument();
     expect(screen.queryByText(ru.pastPeriods.hintExisting)).not.toBeInTheDocument();
+  });
+
+  it("смена месяца в форме переносит строку, а не создаёт вторую", async () => {
+    await seed({
+      periods: [
+        makeRow({
+          id: "p-manual",
+          year: 2026,
+          month: 5,
+          is_manual: true,
+          is_closed: true,
+          closed_totals: { amount: 1500, total_hours: 100, norm_hours_covered: 100 },
+        }),
+      ],
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: `${ru.pastPeriods.edit}: Май 2026` }));
+    await screen.findByLabelText(ru.pastPeriods.hours);
+    fireEvent.change(screen.getByLabelText(ru.pastPeriods.month), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.pastPeriods.save }));
+
+    expect(await screen.findByText(/Июнь 2026/)).toBeInTheDocument();
+    await waitFor(async () => {
+      const rows = await db.periods.filter((row) => row.is_manual && row.deleted_at === null).toArray();
+      expect(rows.map((row) => row.month)).toEqual([6]);
+    });
+  });
+
+  it("убранный месяц с записями возвращается в обычное состояние, а не теряет свои числа", async () => {
+    await seed({
+      periods: [
+        makeRow({
+          id: "p-aug",
+          year: 2026,
+          month: 8,
+          base_rate: 33.3,
+          extra_amount: -120.75,
+          is_manual: true,
+          is_closed: true,
+          closed_totals: { amount: 999, total_hours: 10, norm_hours_covered: 10 },
+        }),
+      ],
+    });
+    await db.day_types.add(makeDayType({ user_id: userId }));
+    await db.entries.add(makeEntry({ id: "e-1", user_id: userId, date: "2026-08-10" }));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: `${ru.pastPeriods.delete}: Август 2026` }));
+
+    expect(await screen.findByText(ru.pastPeriods.empty)).toBeInTheDocument();
+    await waitFor(async () => {
+      expect(await db.periods.get("p-aug")).toMatchObject({
+        deleted_at: null,
+        is_manual: false,
+        base_rate: 33.3,
+        extra_amount: -120.75,
+      });
+    });
   });
 
   it("удаление мягкое, с окном отмены", async () => {

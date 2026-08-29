@@ -82,6 +82,10 @@ export function ExportRestorePage() {
     setChosen(null);
     setImportCounts(null);
     setImportError(null);
+    // Сбрасываем значение поля сразу: браузер не шлёт change, если выбран тот
+    // же самый файл, что и в прошлый раз, и повторный выбор после ошибки не
+    // делал бы ничего — а «ничего не произошло» неотличимо от сломанной сборки.
+    if (fileInputRef.current) fileInputRef.current.value = "";
     if (!file) return;
 
     let text: string;
@@ -113,7 +117,6 @@ export function ExportRestorePage() {
       // Файл применён — второй раз тот же самый применять незачем, а кнопки,
       // оставшиеся на экране, читались бы как «ещё не сделано».
       setChosen(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
       setImportError(`${ru.backup.errorImport} ${error instanceof Error ? error.message : String(error)}`);
     } finally {

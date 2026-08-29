@@ -1,3 +1,5 @@
+import { getPeriodDateRange } from "@/lib/calc/period";
+import { toISODate } from "@/lib/calc/calendarGrid";
 import type { TimeoDB } from "@/db/schema";
 import type { Period, Settings } from "@/types/models";
 
@@ -7,6 +9,81 @@ export interface ManualPeriodDraft {
   /** Отработанные часы за месяц — человек вписывает их, а не выводит из записей. */
   hours: number;
   amount: number;
+  /**
+   * Идентификатор правящегося месяца. Нужен ровно для одного случая: человек
+   * открыл май и поменял в форме месяц на июнь. Без него сохранение заводило бы
+   * ИЮНЬ и оставляло май на месте — один и тот же исторический итог оказывался
+   * бы посчитан дважды, в двух месяцах.
+   */
+  replacingId?: string | null;
+}
+
+export type ManualPeriodSettings = Pick<
+  Settings,
+  "default_base_rate" | "default_norm_hours" | "period_start_day"
+>;
+
+function nowISO(): string {
+  return new Date().toISOString();
+}
+
+function findLive(db: TimeoDB, userId: string, year: number, month: number) {
+  return db.periods
+    .where("[user_id+year+month]")
+    .equals([userId, year, month])
+    .filter((period) => period.deleted_at === null)
+    .first();
+}
+
+/**
+ * Есть ли у месяца собственные записи. От этого зависит, что значит «убрать
+ * исторический месяц»: строку периода, заведённую только ради ввода итогов,
+ * можно мягко удалить целиком, а месяц с записями пришёл из обычной работы
+ * приложения и несёт свою базовую ставку, норму и прочие начисления —
+ * удалить его строку значило бы потерять их молча.
+ */
+async function monthHasEntries(
+  db: TimeoDB,
+  userId: string,
+  year: number,
+  month: number,
+  periodStartDay: number,
+): Promise<boolean> {
+  const { start, end } = getPeriodDateRange(year, month, periodStartDay);
+  const count = await db.entries
+    .where("date")
+    .between(toISODate(start), toISODate(end), true, true)
+    .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
+    .count();
+  return count > 0;
+}
+
+/**
+ * Снять с месяца признак ручного, ничего не потеряв.
+ *
+ * Месяц с записями возвращается в обычное состояние прямо на месте: ставка,
+ * норма и прочие начисления остаются, итоги снова считаются по записям.
+ * Месяц без записей — строка, существовавшая только ради введённых итогов, —
+ * удаляется мягко (CLAUDE.md: необратимо не удаляем ничего). Заодно это
+ * снимает замок инварианта 4: hasClosedPeriods не считает удалённые строки.
+ */
+async function releaseManualPeriod(
+  db: TimeoDB,
+  userId: string,
+  period: Period,
+  periodStartDay: number,
+): Promise<void> {
+  const now = nowISO();
+  if (await monthHasEntries(db, userId, period.year, period.month, periodStartDay)) {
+    await db.periods.update(period.id, {
+      is_manual: false,
+      is_closed: false,
+      closed_totals: null,
+      updated_at: now,
+    });
+    return;
+  }
+  await db.periods.update(period.id, { deleted_at: now, updated_at: now });
 }
 
 /**
@@ -23,9 +100,9 @@ export async function saveManualPeriod(
   db: TimeoDB,
   userId: string,
   draft: ManualPeriodDraft,
-  settings: Pick<Settings, "default_base_rate" | "default_norm_hours">,
+  settings: ManualPeriodSettings,
 ): Promise<Period> {
-  const now = new Date().toISOString();
+  const now = nowISO();
   const closed_totals = {
     amount: draft.amount,
     total_hours: draft.hours,
@@ -36,28 +113,46 @@ export async function saveManualPeriod(
     norm_hours_covered: draft.hours,
   };
 
-  return db.transaction("rw", db.periods, async () => {
+  return db.transaction("rw", db.periods, db.entries, async () => {
     // Мягко удалённые строки не в счёт (инвариант 38): иначе повторное
     // сохранение месяца, удалённого час назад, правило бы удалённую строку, и
     // на экране это выглядело бы как «кнопка «сохранить» ничего не делает».
-    const existing = await db.periods
-      .where("[user_id+year+month]")
-      .equals([userId, draft.year, draft.month])
-      .filter((period) => period.deleted_at === null)
-      .first();
+    const existing = await findLive(db, userId, draft.year, draft.month);
+    const replaced =
+      draft.replacingId && draft.replacingId !== existing?.id
+        ? await db.periods.get(draft.replacingId)
+        : undefined;
+
+    // Месяц в форме сменили, а в новом месяце строки ещё нет — переносим ту же
+    // строку, а не заводим вторую.
+    if (!existing && replaced && replaced.deleted_at === null) {
+      const moved: Period = {
+        ...replaced,
+        year: draft.year,
+        month: draft.month,
+        is_manual: true,
+        is_closed: true,
+        closed_totals,
+        updated_at: now,
+      };
+      await db.periods.put(moved);
+      return moved;
+    }
+
+    // Месяц сменили, и в новом месяце строка уже есть: итоги уезжают в неё, а
+    // прежняя перестаёт быть ручной (с сохранением всего, что в ней было).
+    if (replaced && replaced.deleted_at === null) {
+      await releaseManualPeriod(db, userId, replaced, settings.period_start_day);
+    }
 
     if (existing) {
       // Правка ручного периода идёт сюда же (иначе опечатку в историческом
       // итоге нельзя было бы исправить никогда). Записи месяца, если они вдруг
       // есть, не трогаются: они остаются в базе и вернутся в расчёт, как только
-      // ручной период будет удалён.
-      await db.periods.update(existing.id, {
-        is_manual: true,
-        is_closed: true,
-        closed_totals,
-        updated_at: now,
-      });
-      return { ...existing, is_manual: true, is_closed: true, closed_totals, updated_at: now };
+      // ручной период будет убран.
+      const updated: Period = { ...existing, is_manual: true, is_closed: true, closed_totals, updated_at: now };
+      await db.periods.put(updated);
+      return updated;
     }
 
     const period: Period = {
@@ -96,48 +191,58 @@ export async function listManualPeriods(db: TimeoDB, userId: string): Promise<Pe
 }
 
 /**
- * Мягкое удаление с окном отмены на экране (CLAUDE.md: необратимо не удаляем
- * ничего). Побочный эффект намеренный и полезный: hasClosedPeriods не считает
- * удалённые строки, поэтому удаление последнего ручного периода снова
- * разблокирует день начала периода (инвариант 4).
+ * «Удалить» исторический месяц: снять с него ручные итоги. Строка исчезает
+ * из списка в обоих случаях, но месяц с записями при этом остаётся в базе
+ * целым — см. releaseManualPeriod.
  */
-export async function softDeleteManualPeriod(db: TimeoDB, id: string): Promise<void> {
-  const now = new Date().toISOString();
-  await db.periods.update(id, { deleted_at: now, updated_at: now });
+export async function removeManualPeriod(
+  db: TimeoDB,
+  userId: string,
+  period: Period,
+  periodStartDay: number,
+): Promise<void> {
+  await db.transaction("rw", db.periods, db.entries, async () => {
+    const current = await db.periods.get(period.id);
+    if (!current || current.deleted_at !== null) return;
+    await releaseManualPeriod(db, userId, current, periodStartDay);
+  });
 }
 
 /**
- * Отмена удаления. Пока действовало окно отмены, месяц для всех запросов не
- * существовал, и календарь мог создать для него обычный период (раздел 5.2).
- * Просто снять deleted_at в этом случае нельзя: на один year+month стало бы две
- * живые строки, а выборка периода берёт .first() — месяц раздвоился бы
- * навсегда, и какая из двух строк выиграет, зависело бы от порядка ключей.
+ * Отмена удаления. Возвращаем именно тот снимок итогов, который был на экране:
+ * строку могли не удалять вовсе, а вернуть в обычное состояние (месяц с
+ * записями), и её собственный closed_totals уже пуст.
  *
- * Поэтому: если живая строка месяца уже появилась, ручные итоги переносятся в
- * неё, а удалённая остаётся удалённой.
+ * Пока действовало окно отмены, месяц для всех запросов не существовал, и
+ * календарь мог создать для него обычный период (раздел 5.2). Просто снять
+ * deleted_at в этом случае нельзя: на один year+month стало бы две живые
+ * строки, а выборка периода берёт .first() — месяц раздвоился бы навсегда, и
+ * какая из двух строк выиграет, зависело бы от порядка ключей. Поэтому итоги
+ * переносятся в уже появившуюся строку.
  */
-export async function restoreManualPeriod(db: TimeoDB, id: string): Promise<void> {
-  const now = new Date().toISOString();
+export async function restoreManualPeriod(db: TimeoDB, userId: string, period: Period): Promise<void> {
+  const now = nowISO();
   await db.transaction("rw", db.periods, async () => {
-    const deleted = await db.periods.get(id);
-    if (!deleted) return;
-
-    const live = await db.periods
-      .where("[user_id+year+month]")
-      .equals([deleted.user_id, deleted.year, deleted.month])
-      .filter((period) => period.deleted_at === null)
-      .first();
+    const live = await findLive(db, userId, period.year, period.month);
 
     if (live) {
       await db.periods.update(live.id, {
         is_manual: true,
         is_closed: true,
-        closed_totals: deleted.closed_totals,
+        closed_totals: period.closed_totals,
         updated_at: now,
       });
       return;
     }
 
-    await db.periods.update(id, { deleted_at: null, updated_at: now });
+    const deleted = await db.periods.get(period.id);
+    if (!deleted) return;
+    await db.periods.update(period.id, {
+      deleted_at: null,
+      is_manual: true,
+      is_closed: true,
+      closed_totals: period.closed_totals,
+      updated_at: now,
+    });
   });
 }

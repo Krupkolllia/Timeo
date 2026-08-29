@@ -47,12 +47,18 @@ export async function importBackup(
   mode: ImportMode,
 ): Promise<ImportCounts> {
   return db.transaction("rw", db.settings, db.periods, db.day_types, db.entries, db.holidays, async () => {
+    // Только строки этого пользователя. Соблазн взять все (чтобы чужой
+    // идентификатор случайно не оказался занят) ведёт к худшему: если
+    // localStorage очистился отдельно от IndexedDB, локальный user_id стал
+    // новым, а старые строки остались в базе — и тогда «добавить недостающее»
+    // объявило бы каждый месяц уже существующим и молча не восстановило
+    // НИЧЕГО. Это ровно тот случай, ради которого экран и написан.
     const [settings, periods, day_types, entries, holidays] = await Promise.all([
       db.settings.where("user_id").equals(userId).first(),
-      db.periods.toArray(),
-      db.day_types.toArray(),
-      db.entries.toArray(),
-      db.holidays.toArray(),
+      db.periods.where("user_id").equals(userId).toArray(),
+      db.day_types.where("user_id").equals(userId).toArray(),
+      db.entries.where("user_id").equals(userId).toArray(),
+      db.holidays.where("user_id").equals(userId).toArray(),
     ]);
 
     const plan = planImport({

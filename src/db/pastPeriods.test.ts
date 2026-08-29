@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/db/db";
-import { listManualPeriods, restoreManualPeriod, saveManualPeriod, softDeleteManualPeriod } from "@/db/pastPeriods";
+import { listManualPeriods, removeManualPeriod, restoreManualPeriod, saveManualPeriod } from "@/db/pastPeriods";
 import { getOrCreatePeriod, hasClosedPeriods } from "@/db/periods";
 import { calculatePeriodTotals } from "@/lib/calc/period";
 import { makeDayType, makeEntry, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
 
-const SETTINGS = { default_base_rate: 30, default_norm_hours: 160 };
+const SETTINGS = { default_base_rate: 30, default_norm_hours: 160, period_start_day: 1 };
 
 describe("saveManualPeriod", () => {
   beforeEach(resetDb);
@@ -74,7 +74,7 @@ describe("удаление исторического месяца", () => {
   it("удаление мягкое, месяц исчезает из списка и снова разблокирует день начала периода", async () => {
     const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
 
-    await softDeleteManualPeriod(db, period.id);
+    await removeManualPeriod(db, USER_ID, period, 1);
 
     expect(await listManualPeriods(db, USER_ID)).toEqual([]);
     expect(await db.periods.get(period.id)).toBeTruthy();
@@ -83,9 +83,9 @@ describe("удаление исторического месяца", () => {
 
   it("отмена возвращает месяц", async () => {
     const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
-    await softDeleteManualPeriod(db, period.id);
+    await removeManualPeriod(db, USER_ID, period, 1);
 
-    await restoreManualPeriod(db, period.id);
+    await restoreManualPeriod(db, USER_ID, period);
 
     const restored = await listManualPeriods(db, USER_ID);
     expect(restored.map((row) => row.id)).toEqual([period.id]);
@@ -96,11 +96,11 @@ describe("удаление исторического месяца", () => {
     const settings = makeSettings();
     await db.settings.add(settings);
     const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
-    await softDeleteManualPeriod(db, period.id);
+    await removeManualPeriod(db, USER_ID, period, 1);
     // Пока действовало окно отмены, пользователь пролистал календарь на май.
     const recreated = await getOrCreatePeriod(db, USER_ID, 2026, 5, settings);
 
-    await restoreManualPeriod(db, period.id);
+    await restoreManualPeriod(db, USER_ID, period);
 
     const live = await db.periods
       .where("[user_id+year+month]")
@@ -115,7 +115,7 @@ describe("удаление исторического месяца", () => {
 
   it("сохранение месяца, удалённого раньше, заводит его заново, а не правит удалённую строку", async () => {
     const period = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
-    await softDeleteManualPeriod(db, period.id);
+    await removeManualPeriod(db, USER_ID, period, 1);
 
     const again = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 8, amount: 200 }, SETTINGS);
 
@@ -135,5 +135,91 @@ describe("listManualPeriods", () => {
 
     const rows = await listManualPeriods(db, USER_ID);
     expect(rows.map((row) => `${row.year}-${row.month}`)).toEqual(["2026-6", "2026-5", "2025-12"]);
+  });
+});
+
+describe("правка месяца у уже сохранённого исторического периода", () => {
+  beforeEach(resetDb);
+
+  it("смена месяца переносит ту же строку, а не заводит вторую", async () => {
+    const may = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+
+    // Человек открыл май и понял, что месяц выбран не тот.
+    await saveManualPeriod(
+      db,
+      USER_ID,
+      { year: 2026, month: 6, hours: 100, amount: 1500, replacingId: may.id },
+      SETTINGS,
+    );
+
+    const rows = await listManualPeriods(db, USER_ID);
+    // Иначе один и тот же исторический итог оказался бы посчитан дважды, в
+    // двух разных месяцах.
+    expect(rows.map((row) => `${row.year}-${row.month}`)).toEqual(["2026-6"]);
+    expect(rows[0].id).toBe(may.id);
+  });
+
+  it("смена месяца на уже занятый переносит итоги в него и освобождает прежний", async () => {
+    const may = await saveManualPeriod(db, USER_ID, { year: 2026, month: 5, hours: 100, amount: 1500 }, SETTINGS);
+    await saveManualPeriod(db, USER_ID, { year: 2026, month: 6, hours: 8, amount: 200 }, SETTINGS);
+
+    await saveManualPeriod(
+      db,
+      USER_ID,
+      { year: 2026, month: 6, hours: 100, amount: 1500, replacingId: may.id },
+      SETTINGS,
+    );
+
+    const rows = await listManualPeriods(db, USER_ID);
+    expect(rows.map((row) => `${row.year}-${row.month}`)).toEqual(["2026-6"]);
+    expect(rows[0].closed_totals?.amount).toBe(1500);
+  });
+});
+
+describe("месяц с записями, превращённый в ручной", () => {
+  beforeEach(resetDb);
+
+  async function seedAugustWithEntry() {
+    await db.settings.add(makeSettings());
+    await db.day_types.add(makeDayType());
+    await db.periods.add(
+      makePeriod({ id: "p-aug", year: 2026, month: 8, base_rate: 33.3, norm_hours: 150, extra_amount: -120.75 }),
+    );
+    await db.entries.add(makeEntry({ id: "e-1", date: "2026-08-10", amount: 240 }));
+  }
+
+  it("убрать его — значит вернуть месяц в обычное состояние, не потеряв ни числа", async () => {
+    await seedAugustWithEntry();
+    await saveManualPeriod(db, USER_ID, { year: 2026, month: 8, hours: 10, amount: 999 }, SETTINGS);
+    const converted = await db.periods.get("p-aug");
+
+    await removeManualPeriod(db, USER_ID, converted!, 1);
+
+    const period = await db.periods.get("p-aug");
+    // Мягкое удаление строки стёрло бы ставку месяца, его норму и прочие
+    // начисления: календарь завёл бы период заново по умолчаниям.
+    expect(period).toMatchObject({
+      deleted_at: null,
+      is_manual: false,
+      is_closed: false,
+      closed_totals: null,
+      base_rate: 33.3,
+      norm_hours: 150,
+      extra_amount: -120.75,
+    });
+    expect(await listManualPeriods(db, USER_ID)).toEqual([]);
+  });
+
+  it("отмена возвращает ручные итоги той же строке", async () => {
+    await seedAugustWithEntry();
+    await saveManualPeriod(db, USER_ID, { year: 2026, month: 8, hours: 10, amount: 999 }, SETTINGS);
+    const converted = (await db.periods.get("p-aug"))!;
+    await removeManualPeriod(db, USER_ID, converted, 1);
+
+    await restoreManualPeriod(db, USER_ID, converted);
+
+    const period = await db.periods.get("p-aug");
+    expect(period).toMatchObject({ is_manual: true, is_closed: true, extra_amount: -120.75 });
+    expect(period?.closed_totals).toEqual({ amount: 999, total_hours: 10, norm_hours_covered: 10 });
   });
 });

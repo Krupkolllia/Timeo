@@ -345,6 +345,27 @@ describe("режим «добавить недостающее» (инвариа
   });
 });
 
+describe("восстановление после смены локального идентификатора", () => {
+  beforeEach(resetDb);
+
+  it("«добавить недостающее» видит свою базу пустой, даже если в ней лежат строки прежнего user_id", async () => {
+    await seedRichDatabase();
+    const file = await readBackup(db, USER_ID, "0.1.7");
+
+    // localStorage очистился отдельно от IndexedDB: идентификатор новый,
+    // старые строки на месте и невидимы для всех запросов.
+    const freshUser = "user-after-storage-wipe";
+
+    const counts = await importBackup(db, freshUser, file, "merge");
+
+    // Иначе каждый месяц из файла считался бы «уже существующим», и
+    // восстановление молча не сделало бы ничего.
+    expect(counts.periods).toBe(4);
+    expect(counts.entries).toBe(5);
+    expect(await db.periods.where("user_id").equals(freshUser).count()).toBe(4);
+  });
+});
+
 describe("замена всего", () => {
   beforeEach(resetDb);
 

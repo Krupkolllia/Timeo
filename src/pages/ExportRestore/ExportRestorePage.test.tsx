@@ -210,6 +210,21 @@ describe("ExportRestorePage — восстановление", () => {
     expect(await db.entries.count()).toBe(1);
   });
 
+  it("тот же файл, выбранный повторно после ошибки, снова разбирается", async () => {
+    await seed();
+    renderPage();
+
+    const broken = fileFromText("{ не json", "same.json");
+    await chooseFile(broken);
+    expect(await screen.findByText(ru.backup.errorInvalidJson)).toBeInTheDocument();
+
+    // Браузер не шлёт change для того же самого файла, если поле не сброшено:
+    // повторный выбор молча не делал бы ничего.
+    await chooseFile(fileFromText(serializeBackup(validBackup()), "same.json"));
+
+    expect(await screen.findByRole("button", { name: ru.backup.modeMerge })).toBeInTheDocument();
+  });
+
   it("файл более новой версии отвергается с понятным текстом (инвариант 48)", async () => {
     await seed();
     renderPage();

@@ -3,8 +3,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
-import { listManualPeriods, restoreManualPeriod, saveManualPeriod, softDeleteManualPeriod } from "@/db/pastPeriods";
-import { getPeriodLabel, periodForDate } from "@/lib/calc/period";
+import { listManualPeriods, removeManualPeriod, restoreManualPeriod, saveManualPeriod } from "@/db/pastPeriods";
+import { getPeriodIdentityFromLabel, getPeriodLabel, periodForDate } from "@/lib/calc/period";
 import { NumberInput } from "@/components/NumberInput";
 import { ru } from "@/i18n/ru";
 import type { Period } from "@/types/models";
@@ -19,8 +19,12 @@ interface Draft {
   month: number;
   hours: number;
   amount: number;
-  /** Правка уже существующего месяца, а не новый: меняет заголовок и предупреждения. */
-  editing: boolean;
+  /**
+   * Правящаяся строка. null — заводится новый месяц. Идентификатор нужен не
+   * только для предупреждений: если в форме сменить месяц, сохранение обязано
+   * перенести ту же строку, а не завести вторую с тем же итогом.
+   */
+  editingId: string | null;
 }
 
 export function PastPeriodsPage() {
@@ -74,6 +78,16 @@ export function PastPeriodsPage() {
   // внутрь неё не проходит — вытаскиваем число отдельно.
   const periodStartDay = settings.period_start_day;
 
+  // Форма работает в тех же названиях месяцев, что и список, а хранит период
+  // по его устойчивому идентификатору (раздел 5.2). При period_start_day > 1 и
+  // именовании по месяцу окончания это разные месяцы, и без пересчёта строка
+  // «Июнь 2026» открывалась бы формой, где выбран май.
+  const toIdentity = (labelYear: number, labelMonth: number) =>
+    getPeriodIdentityFromLabel(labelYear, labelMonth, periodStartDay, settings.period_naming);
+  const draftLabel = draft
+    ? getPeriodLabel(draft.year, draft.month, periodStartDay, settings.period_naming)
+    : { year: today.getFullYear(), month: today.getMonth() + 1 };
+
   const label = (period: { year: number; month: number }) => {
     const id = getPeriodLabel(period.year, period.month, settings.period_start_day, settings.period_naming);
     return `${ru.calendar.monthNames[id.month - 1]} ${id.year}`;
@@ -86,7 +100,7 @@ export function PastPeriodsPage() {
         month: period.month,
         hours: period.closed_totals?.total_hours ?? 0,
         amount: period.closed_totals?.amount ?? 0,
-        editing: true,
+        editingId: period.id,
       });
       return;
     }
@@ -94,7 +108,7 @@ export function PastPeriodsPage() {
     // текущего периода, который считается сам.
     const previous = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const id = periodForDate(previous, periodStartDay);
-    setDraft({ year: id.year, month: id.month, hours: 0, amount: 0, editing: false });
+    setDraft({ year: id.year, month: id.month, hours: 0, amount: 0, editingId: null });
   }
 
   async function handleSave() {
@@ -106,7 +120,13 @@ export function PastPeriodsPage() {
       await saveManualPeriod(
         db,
         userId,
-        { year: draft.year, month: draft.month, hours: draft.hours, amount: draft.amount },
+        {
+          year: draft.year,
+          month: draft.month,
+          hours: draft.hours,
+          amount: draft.amount,
+          replacingId: draft.editingId,
+        },
         settings,
       );
     } finally {
@@ -116,7 +136,8 @@ export function PastPeriodsPage() {
   }
 
   async function handleDelete(period: Period) {
-    await softDeleteManualPeriod(db, period.id);
+    if (!settings) return;
+    await removeManualPeriod(db, userId, period, settings.period_start_day);
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     setPendingUndo(period);
     undoTimeoutRef.current = setTimeout(() => setPendingUndo(null), 5000);
@@ -125,14 +146,16 @@ export function PastPeriodsPage() {
   async function handleUndoDelete() {
     if (!pendingUndo) return;
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-    await restoreManualPeriod(db, pendingUndo.id);
+    await restoreManualPeriod(db, userId, pendingUndo);
     setPendingUndo(null);
   }
 
   // Предупреждения формы. Все пассивные: строка появляется, кнопка работает.
   const existingPeriod =
     draft && allPeriods.find((period) => period.year === draft.year && period.month === draft.month);
-  const warnExisting = Boolean(existingPeriod) && !draft?.editing;
+  // Предупреждаем только о ЧУЖОЙ строке: собственный правящийся месяц — не
+  // «уже существующий период».
+  const warnExisting = Boolean(existingPeriod) && existingPeriod?.id !== draft?.editingId;
   // «Месяц ещё не наступил» считаем от периода сегодняшнего дня, а не от
   // календарного месяца: при period_start_day > 1 это разные вещи.
   const currentPeriod = periodForDate(today, periodStartDay);
@@ -144,7 +167,7 @@ export function PastPeriodsPage() {
   // Про замок дня начала периода (инвариант 4) говорим только тогда, когда он
   // ещё не защёлкнут: у кого уже есть закрытый месяц, предупреждать не о чем.
   const warnLock =
-    draft !== null && !draft.editing && !allPeriods.some((period) => period.is_closed);
+    draft !== null && draft.editingId === null && !allPeriods.some((period) => period.is_closed);
 
   const warning = warnExisting
     ? ru.pastPeriods.hintExisting
@@ -187,8 +210,8 @@ export function PastPeriodsPage() {
               <select
                 id="past-period-month"
                 className="mt-1 min-h-11 w-full rounded-lg bg-white/5 px-2 py-3"
-                value={draft.month}
-                onChange={(event) => setDraft({ ...draft, month: Number(event.target.value) })}
+                value={draftLabel.month}
+                onChange={(event) => setDraft({ ...draft, ...toIdentity(draftLabel.year, Number(event.target.value)) })}
               >
                 {ru.calendar.monthNames.map((name, index) => (
                   <option key={name} value={index + 1}>
@@ -204,8 +227,8 @@ export function PastPeriodsPage() {
               <select
                 id="past-period-year"
                 className="mt-1 min-h-11 w-full rounded-lg bg-white/5 px-2 py-3"
-                value={draft.year}
-                onChange={(event) => setDraft({ ...draft, year: Number(event.target.value) })}
+                value={draftLabel.year}
+                onChange={(event) => setDraft({ ...draft, ...toIdentity(Number(event.target.value), draftLabel.month) })}
               >
                 {years.map((year) => (
                   <option key={year} value={year}>
