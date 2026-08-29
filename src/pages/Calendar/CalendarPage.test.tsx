@@ -137,6 +137,18 @@ describe("CalendarPage — сетка", () => {
     await ready();
     expect(screen.getByText(/^v\d+\.\d+\.\d+/)).toBeInTheDocument();
   });
+
+  it("даёт скроллеру верхний отступ, равный зазору между строк недель", async () => {
+    // Часть бага 1, проверяемая без вёрстки: у скроллера должен быть тот же
+    // отступ сверху, что и gap-1 между строками, иначе праздничная ячейка в
+    // первой неделе (ring-1) обрезается его границей клиппинга — сам факт
+    // клиппинга виден только в браузере (390×844), см. ручную проверку в отчёте.
+    renderCalendar();
+    await ready();
+
+    const scroller = dayCell("2026-08-01").closest(".overflow-y-auto");
+    expect(scroller?.className).toMatch(/\bpt-1\b/);
+  });
 });
 
 describe("CalendarPage — навигация по периодам", () => {

@@ -278,7 +278,12 @@ export function CalendarPage() {
         ))}
       </div>
 
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-32">
+      {/* pt-1 повторяет gap-1 между строк сверху: у праздничной ячейки в первой
+          строке ring-1 (раздел 8.1) рисуется за пределами её border box, а
+          сам скроллер раньше начинался без отступа — ровно на границе своей
+          области клиппинга, — и обводка обрезалась на паре пикселей на любом
+          месяце, чья первая неделя содержит праздник. */}
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-32">
         {weeks.map((week) => (
           <div key={toISODate(week[0])} className="grid grid-cols-7 gap-1">
             {week.map((date) => {
