@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { PastPeriodsPage } from "@/pages/PastPeriods/PastPeriodsPage";
@@ -21,12 +21,19 @@ async function seed({ periods = [], settings = {} }: { periods?: Period[]; setti
 
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="location">{`${location.pathname}${location.search}`}</span>;
+  const type = useNavigationType();
+  return (
+    <>
+      <span data-testid="location">{`${location.pathname}${location.search}`}</span>
+      <span data-testid="nav-type">{type}</span>
+    </>
+  );
 }
 
-function renderPage(initialEntry = "/settings/past-periods") {
+function renderPage(initialEntry: string | string[] = "/settings/past-periods", initialIndex?: number) {
+  const entries = Array.isArray(initialEntry) ? initialEntry : [initialEntry];
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter initialEntries={entries} initialIndex={initialIndex ?? entries.length - 1}>
       <LocationProbe />
       <Routes>
         <Route path="/settings/past-periods" element={<PastPeriodsPage />} />
@@ -407,6 +414,16 @@ describe("PastPeriodsPage — навигация", () => {
 
     expect(await screen.findByRole("button", { name: ru.pastPeriods.add })).toBeInTheDocument();
     expect(currentLocation()).toBe("/settings/past-periods");
+  });
+
+  it("«назад» возвращается по истории, а не кладёт новую запись поверх неё", async () => {
+    await seed();
+    renderPage(["/period?year=2026&month=8", "/settings/past-periods?return=%2Fperiod%3Fyear%3D2026%26month%3D8"]);
+
+    fireEvent.click(await screen.findByRole("button", { name: ru.pastPeriods.back }));
+
+    expect(currentLocation()).toBe("/period?year=2026&month=8");
+    expect(screen.getByTestId("nav-type").textContent).toBe("POP");
   });
 
   it("без return= уходит на календарь", async () => {

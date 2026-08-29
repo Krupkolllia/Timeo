@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import {
@@ -37,8 +38,9 @@ function parsePeriodParam(value: string | null, min: number, max: number): numbe
 
 export function PeriodSummaryPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
+  // Правило «назад» одно на все внутренние экраны, см. useBackTo.
+  const goBack = useBackTo("/");
 
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
   const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).toArray(), []);
@@ -153,14 +155,6 @@ export function PeriodSummaryPage() {
     };
   }, []);
 
-  function handleBack() {
-    // В standalone-режиме браузерной кнопки «назад» нет, а history может быть
-    // пустой (прямой заход, восстановление PWA) — тогда navigate(-1) никуда не
-    // ведёт и экран замирает.
-    if (location.key === "default") navigate("/");
-    else navigate(-1);
-  }
-
   async function handleApplyRate(mode: RateChangeMode, fromDateISO: string | null) {
     if (!viewed || !settings) return;
     setRateDialogOpen(false);
@@ -213,7 +207,7 @@ export function PeriodSummaryPage() {
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
           className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
-          onClick={handleBack}
+          onClick={goBack}
           aria-label={ru.period.back}
         >
           ‹

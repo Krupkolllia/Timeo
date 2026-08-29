@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { ExportRestorePage } from "@/pages/ExportRestore/ExportRestorePage";
@@ -35,12 +35,21 @@ function clearShare() {
 
 function LocationProbe() {
   const location = useLocation();
-  return <span data-testid="location">{`${location.pathname}${location.search}`}</span>;
+  // Тип последней навигации: PUSH означает, что в историю добавлена запись, и
+  // именно из-за этого экраны зацикливались друг на друге.
+  const type = useNavigationType();
+  return (
+    <>
+      <span data-testid="location">{`${location.pathname}${location.search}`}</span>
+      <span data-testid="nav-type">{type}</span>
+    </>
+  );
 }
 
-function renderPage(initialEntry = "/settings/export") {
+function renderPage(initialEntry: string | string[] = "/settings/export", initialIndex?: number) {
+  const entries = Array.isArray(initialEntry) ? initialEntry : [initialEntry];
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter initialEntries={entries} initialIndex={initialIndex ?? entries.length - 1}>
       <LocationProbe />
       <Routes>
         <Route path="/settings/export" element={<ExportRestorePage />} />
@@ -298,6 +307,19 @@ describe("ExportRestorePage — навигация", () => {
     fireEvent.click(screen.getByRole("button", { name: ru.backup.back }));
 
     expect(currentLocation()).toBe("/period?year=2026&month=8");
+  });
+
+  it("«назад» возвращается по истории, а не кладёт новую запись поверх неё", async () => {
+    await seed();
+    // Пользователь пришёл сюда с экрана периода — история непустая.
+    renderPage(["/period?year=2026&month=8", "/settings/export?return=%2Fperiod%3Fyear%3D2026%26month%3D8"]);
+
+    fireEvent.click(screen.getByRole("button", { name: ru.backup.back }));
+
+    expect(currentLocation()).toBe("/period?year=2026&month=8");
+    // PUSH здесь и есть баг: «назад» на экране периода уходит по истории и
+    // попадал бы обратно сюда — экраны менялись местами до бесконечности.
+    expect(screen.getByTestId("nav-type").textContent).toBe("POP");
   });
 
   it("экран открывается и на пустой базе — именно в этом состоянии восстанавливают", async () => {
