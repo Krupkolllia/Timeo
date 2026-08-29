@@ -87,10 +87,45 @@ export default defineConfig({
     },
   },
   test: {
+    // jsdom, а не node: экраны — половина приложения, и до появления
+    // компонентных тестов ни одна их строка не проверялась вовсе. Расчётные
+    // тесты от смены окружения не страдают.
+    environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     // Agent worktrees under .claude/worktrees are only git-ignored via the local,
     // unshared .git/info/exclude — Vitest globs the filesystem directly and would
     // otherwise pick up whatever stale branch state happens to be checked out there.
     exclude: [...configDefaults.exclude, "**/.claude/worktrees/**"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "html", "lcov"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        // Точка входа: дёргает createRoot и регистрацию service worker — в
+        // jsdom это проверяет только то, что моки вызвались.
+        "src/main.tsx",
+        "src/vite-env.d.ts",
+        // Только типы и константы, исполняемого кода нет.
+        "src/types/**",
+        "src/i18n/**",
+        "src/lib/export/backup.ts",
+        // Заглушки блоков 5–7: пустой div, покрывать нечего.
+        "src/pages/DayTypes/**",
+        "src/pages/Holidays/**",
+        "src/pages/PastPeriods/**",
+        "src/pages/ExportRestore/**",
+      ],
+      // Ветки — главный порог: это платёжный журнал, и почти каждая ошибка из
+      // ревью пряталась именно в невыполненной ветке (закрытый период, запись
+      // старого формата, гонка при создании строки).
+      thresholds: {
+        branches: 90,
+        functions: 90,
+        lines: 90,
+        statements: 90,
+      },
+    },
   },
 });
