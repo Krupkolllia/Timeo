@@ -14,7 +14,10 @@ export function MonthYearPicker({ year, month, onSelect, onClose }: MonthYearPic
   const [displayYear, setDisplayYear] = useState(year);
 
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-6" onClick={onClose}>
+    // z-30, как у шторки дня: на z-20 выбор месяца стоял вровень с панелью
+    // итогов и оказывался поверх неё лишь по порядку в разметке — тот же
+    // недосмотр, из-за которого панель накрывала кнопку «Закрыть».
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 px-6" onClick={onClose}>
       <div className="w-full max-w-xs rounded-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <button

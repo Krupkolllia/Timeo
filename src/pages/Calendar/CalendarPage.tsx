@@ -383,7 +383,12 @@ export function CalendarPage() {
 
       {openDayDate && period && dayTypes && (
         <div
-          className="day-sheet-overlay fixed inset-0 z-10 flex items-end bg-black/50"
+          // z-30 — выше панели итогов (z-20). Слои на календаре: панель итогов
+          // 20, шторка дня и выбор месяца 30, плашка отмены 40. При z-10
+          // панель итогов накрывала нижние 44px шторки, то есть кнопку
+          // «Закрыть» целиком: нажатие уходило в панель и вместо закрытия
+          // открывало расшифровку периода.
+          className="day-sheet-overlay fixed inset-0 z-30 flex items-end bg-black/50"
           onClick={() => setOpenDayDate(null)}
         >
           {/* Лимит высоты (85dvh) и анимация появления живут в .day-sheet — на
@@ -422,7 +427,7 @@ export function CalendarPage() {
           пользователь смотрит на изменившийся итог, либо двигает их вверх и
           даёт скачок вёрстки. */}
       {pendingUndo && (
-        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
+        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
           <span className="text-sm">{ru.day.deletedNotice}</span>
           {/* min-h-11 поднимает область нажатия до 44px (была 20px), -mr-2
               компенсирует добавленный padding, чтобы плашка не растолстела. */}
