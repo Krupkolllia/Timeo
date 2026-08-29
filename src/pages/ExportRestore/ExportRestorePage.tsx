@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { importBackup, readBackup } from "@/db/backup";
@@ -43,9 +44,10 @@ function outcomeText(outcome: DeliveryOutcome): string {
 }
 
 export function ExportRestorePage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = searchParams.get("return") ?? "/";
+  // return= — запасной адрес для холодного входа; при живой истории «назад»
+  // идёт по ней, иначе экран периода и этот экран зацикливались друг на друге.
+  const goBack = useBackTo(searchParams.get("return") ?? "/");
 
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [chosen, setChosen] = useState<ChosenFile | null>(null);
@@ -130,7 +132,7 @@ export function ExportRestorePage() {
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
           className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
-          onClick={() => navigate(returnTo)}
+          onClick={goBack}
           aria-label={ru.backup.back}
         >
           ‹

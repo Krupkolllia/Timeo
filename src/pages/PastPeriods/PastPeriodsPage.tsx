@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { listManualPeriods, removeManualPeriod, restoreManualPeriod, saveManualPeriod } from "@/db/pastPeriods";
@@ -30,7 +31,9 @@ interface Draft {
 export function PastPeriodsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = searchParams.get("return") ?? "/";
+  // return= — запасной адрес для холодного входа; при живой истории «назад»
+  // идёт по ней, иначе экран периода и этот экран зацикливались друг на друге.
+  const goBack = useBackTo(searchParams.get("return") ?? "/");
 
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
   const manualPeriods = useLiveQuery(() => listManualPeriods(db, userId), []);
@@ -195,7 +198,7 @@ export function PastPeriodsPage() {
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
           className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
-          onClick={() => (draft ? setDraft(null) : navigate(returnTo))}
+          onClick={() => (draft ? setDraft(null) : goBack())}
           aria-label={ru.pastPeriods.back}
         >
           ‹
