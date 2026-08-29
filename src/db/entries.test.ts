@@ -28,6 +28,7 @@ const baseFields: Omit<Entry, "id" | "created_at" | "updated_at" | "deleted_at">
   start_time: null,
   end_time: null,
   break_minutes: null,
+  duration_is_manual: false,
   note: "",
   rate_source: "period_base",
 };

@@ -166,6 +166,7 @@ async function seedEntry(database: TimeoDB, overrides: Partial<Entry> & Pick<Ent
     start_time: null,
     end_time: null,
     break_minutes: null,
+    duration_is_manual: false,
     note: "",
     rate_source: "period_base",
     ...overrides,

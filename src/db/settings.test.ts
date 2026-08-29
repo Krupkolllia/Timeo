@@ -68,6 +68,7 @@ describe("updateWeekendMultipliers", () => {
         start_time: null,
         end_time: null,
         break_minutes: null,
+        duration_is_manual: false,
         note: "",
         rate_source: "period_base",
       });

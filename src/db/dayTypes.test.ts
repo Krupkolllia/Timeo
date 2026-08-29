@@ -144,6 +144,7 @@ async function seedEntry(database: TimeoDB, dayTypeId: string, patch: Partial<En
     start_time: null,
     end_time: null,
     break_minutes: null,
+    duration_is_manual: false,
     note: "",
     rate_source: "period_base",
     ...patch,
