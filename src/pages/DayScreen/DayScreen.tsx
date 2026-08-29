@@ -316,6 +316,35 @@ export function DayScreen({
     // another type — keep those instead of overwriting them with the new
     // type's defaults, only day_type_id and the pay_mode-dependent amount change.
     if (!draft) return;
+
+    // Исключение — замок (раздел 5.3.1). «Своя ставка» и «ставка периода» это
+    // не пользовательский ввод, а правило самого типа дня, и перенести старые
+    // деньги через эту границу нельзя ни в одну сторону:
+    //
+    //  - переход НА pinned-тип сохранял бы базовую ставку и множитель выходного
+    //    вместо собственной ставки типа: 6ч × 30 × 2 = 360 там, где тип дня
+    //    объявил 55 zł/h и раздел 6.2 запрещает множитель вовсе;
+    //  - переход С pinned-типа оставлял бы его 55 zł/h на записи как ручную
+    //    ставку, и она пережила бы даже смену базовой ставки периода.
+    //
+    // Часы, заметка, времена и ручная сумма при этом остаются пользовательскими:
+    // именно ради них эта ветка и существует.
+    const previous = dayTypeById.get(draft.day_type_id);
+    if (dt.rate_mode === "pinned" || previous?.rate_mode === "pinned") {
+      const defaults = buildEntryDefaultsForDayType(parsedDate, dt, period, holiday, settings.weekend_multipliers);
+      const switched = {
+        ...draft,
+        day_type_id: dt.id,
+        multiplier: defaults.multiplier,
+        rate_per_hour: defaults.rate_per_hour,
+        rate_is_manual: defaults.rate_is_manual,
+        rate_source: defaults.rate_source,
+      };
+      const recomputed = calculateEntryAmount(switched, dt, period);
+      void persist({ ...switched, amount: recomputed.amount, rate_per_hour: recomputed.rate_per_hour });
+      return;
+    }
+
     const next = { ...draft, day_type_id: dt.id };
     const { amount, rate_per_hour } = calculateEntryAmount(next, dt, period);
     void persist({ ...next, amount, rate_per_hour });
@@ -540,7 +569,6 @@ export function DayScreen({
               onClick={() => handleSelectDayType(dt)}
               aria-pressed={isSelected}
               className="flex w-16 shrink-0 flex-col items-center gap-1"
-              title={dt.note || undefined}
             >
               {/* aria-hidden: значок дублирует имя, стоящее рядом, и без этого
                   доступное имя кнопки превращается в «Н Ночная смена». */}
@@ -572,6 +600,13 @@ export function DayScreen({
           <span className="w-full truncate text-center text-[11px] text-white/50">{ru.day.createDayTypeShort}</span>
         </button>
       </div>
+
+      {/* Раздел 5.3: заметка типа дня «видна при выборе типа». Отдельной
+          строкой под рядом, а не подписью под кружком (в колонке 64px не
+          помещается) и не атрибутом title: на телефоне тултипа не существует,
+          и поле молча не делало бы ничего. Высота зарезервирована — иначе
+          выбор типа с заметкой сдвигал бы вниз всю шторку. */}
+      <p className="-mt-2 min-h-[1rem] shrink-0 truncate text-xs text-white/40">{dayType?.note ?? ""}</p>
 
       {draft && dayType && (
         <>

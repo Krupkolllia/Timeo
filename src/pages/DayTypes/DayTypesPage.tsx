@@ -184,8 +184,9 @@ export function DayTypesPage() {
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
     // Архивные идут после активных: иначе их номера смешались бы с активными
-    // и порядок «прыгал» бы при возврате типа из архива.
-    void reorderDayTypes(db, [...next, ...archived].map((dt) => dt.id));
+    // и порядок «прыгал» бы при возврате типа из архива. Мягко удалённые
+    // перенумеровывает сам слой данных — экран их не видит.
+    void reorderDayTypes(db, userId, [...next, ...archived].map((dt) => dt.id));
   }
 
   if (!settings || !current || dayTypes === undefined || period === undefined) {

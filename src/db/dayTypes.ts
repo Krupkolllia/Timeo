@@ -236,10 +236,22 @@ export interface DeleteDayTypeResult {
  */
 export async function deleteDayType(db: TimeoDB, id: string): Promise<DeleteDayTypeResult> {
   return db.transaction("rw", db.day_types, db.entries, async () => {
-    const referencingEntries = await db.entries.where("day_type_id").equals(id).count();
+    const dayType = await db.day_types.get(id);
+    if (!dayType) return { deleted: false, referencingEntries: 0 };
+
+    // Фильтр по user_id, а не просто счёт по индексу day_type_id: после
+    // миграции локальных данных при первом входе (блок 8) в базе окажутся
+    // строки под двумя разными user_id, и чужая запись отказывала бы в
+    // удалении без всякого объяснения.
+    const referencingEntries = await db.entries
+      .where("day_type_id")
+      .equals(id)
+      .filter((entry) => entry.user_id === dayType.user_id)
+      .count();
     if (referencingEntries > 0) return { deleted: false, referencingEntries };
 
-    await db.day_types.update(id, { deleted_at: nowISO(), updated_at: nowISO() });
+    const now = nowISO();
+    await db.day_types.update(id, { deleted_at: now, updated_at: now });
     return { deleted: true, referencingEntries: 0 };
   });
 }
@@ -253,10 +265,18 @@ export async function restoreDayType(db: TimeoDB, id: string): Promise<void> {
  * транзакцией: половина применённого порядка — это список, в котором два типа
  * делят один номер.
  */
-export async function reorderDayTypes(db: TimeoDB, orderedIds: string[]): Promise<void> {
+export async function reorderDayTypes(db: TimeoDB, userId: string, orderedIds: string[]): Promise<void> {
   await db.transaction("rw", db.day_types, async () => {
+    // Нумеруются ВСЕ типы пользователя, включая мягко удалённые: экран их не
+    // видит и в orderedIds не присылает, а их прежние номера остаются в базе.
+    // Отмена удаления в пятисекундном окне возвращала бы тип с номером, уже
+    // занятым другим типом, и порядок двух строк становился бы случайным.
+    const rest = (await db.day_types.where("user_id").equals(userId).toArray())
+      .filter((dayType) => !orderedIds.includes(dayType.id))
+      .sort((a, b) => a.sort_order - b.sort_order);
+
     const now = nowISO();
-    for (const [index, id] of orderedIds.entries()) {
+    for (const [index, id] of [...orderedIds, ...rest.map((dayType) => dayType.id)].entries()) {
       await db.day_types.update(id, { sort_order: index, updated_at: now });
     }
   });

@@ -67,7 +67,10 @@ export interface DayTypeChangePlanInput {
  *
  * Исключены (инварианты 8 и 9):
  *  - записи с amount_override — сумма задана человеком целиком;
- *  - записи с rate_is_manual — ставка отвязана от правил;
+ *  - записи с rate_is_manual — ставку задал человек. Исключение — записи с
+ *    rate_source = "type_pinned": флаг им поставил этот же механизм, означает
+ *    он «ставка пришла из типа дня», и обновлять их пользователь как раз и
+ *    соглашается;
  *  - записи чужих типов дня и удалённые.
  *
  * ЧАСЫ не трогаются вовсе. default_hours — шаблон для новых записей, а часы
@@ -86,7 +89,13 @@ export function planDayTypeChange(input: DayTypeChangePlanInput): EntryDayTypePa
     if (entry.day_type_id !== input.dayType.id) continue;
     if (entry.date < input.periodStartISO || entry.date > input.periodEndISO) continue;
     if (entry.amount_override !== null) continue;
-    if (entry.rate_is_manual) continue;
+    // rate_is_manual исключает запись из пересчёта (инвариант 9), но у
+    // pinned-типа этот флаг ставит сам этот механизм: он означает «ставка
+    // отвязана от базовой», а не «человек вписал число». Различает их
+    // rate_source. Без исключения тип со своей ставкой мог обновить свои
+    // записи ровно один раз: следующая правка ставки молча давала ноль
+    // записей к обновлению и никакого объяснения.
+    if (entry.rate_is_manual && entry.rate_source !== "type_pinned") continue;
 
     // Дату разбираем вручную: new Date("2026-08-10") — это UTC-полночь, и на
     // положительном смещении она превращается в 10 августа только случайно

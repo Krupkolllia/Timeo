@@ -670,6 +670,75 @@ describe("DayScreen — ряд типов дня (раздел 8.2)", () => {
     expect(screen.queryByRole("button", { name: "Удалённый" })).toBeNull();
   });
 
+  it("показывает заметку выбранного типа: title на телефоне не существует (раздел 5.3)", async () => {
+    const described = makeDayType({ id: "dt-note", name: "С заметкой", note: "Смена у второго клиента", sort_order: 9 });
+
+    renderDay({ dayTypes: [hourly, described] });
+
+    fireEvent.click(await screen.findByRole("button", { name: described.name }));
+
+    expect(await screen.findByText("Смена у второго клиента")).toBeInTheDocument();
+  });
+
+  it("переход на тип со своей ставкой после правки берёт его ставку, а не прежние деньги", async () => {
+    // Ветка «пользователь уже вводил значения» переносит введённое на новый
+    // тип. Для замка это неверно в обе стороны: он не пользовательский ввод, а
+    // правило типа дня (раздел 5.3.1). Без исключения тап по «своей ставке»
+    // после правки часов давал 6 × 30 × 2 = 360 вместо 6 × 55 = 330.
+    const pinned = makeDayType({
+      id: "dt-pinned",
+      name: "Своя ставка",
+      rate_mode: "pinned",
+      default_rate: 55,
+      sort_order: 8,
+    });
+
+    renderDay({
+      date: SUNDAY,
+      dayTypes: [hourly, pinned],
+      settings: { weekend_multipliers: { saturday: 1.5, sunday: 2, holiday: 2.5 } },
+    });
+
+    // Правим часы — это и включает ветку переноса значений.
+    type(fields().hours, "6");
+    await waitFor(() => expect(fields().hours).toHaveValue("6"));
+
+    fireEvent.click(screen.getByRole("button", { name: pinned.name }));
+
+    await waitFor(() => expect(fields().rate).toHaveValue("55"));
+    expect(fields().multiplier).toHaveValue("1");
+    expect(fields().amount).toHaveValue("330"); // 6 × 55
+    expect(fields().hours).toHaveValue("6"); // введённое пользователем сохранено
+  });
+
+  it("переход С типа со своей ставкой возвращает запись к базовой ставке периода", async () => {
+    const pinned = makeDayType({
+      id: "dt-pinned",
+      name: "Своя ставка",
+      rate_mode: "pinned",
+      default_rate: 55,
+      sort_order: 8,
+    });
+
+    renderDay({ dayTypes: [pinned, hourly] });
+
+    fireEvent.click(await screen.findByRole("button", { name: pinned.name }));
+    await waitFor(() => expect(fields().rate).toHaveValue("55"));
+
+    type(fields().hours, "6");
+    await waitFor(() => expect(fields().hours).toHaveValue("6"));
+
+    fireEvent.click(screen.getByRole("button", { name: hourly.name }));
+
+    // 55 zł/h принадлежала прежнему типу дня. Остаться она не может: как
+    // ручная ставка она пережила бы даже смену базовой ставки периода.
+    await waitFor(() => expect(fields().rate).toHaveValue("30"));
+    const stored = await onlyEntry();
+    expect(stored.rate_is_manual).toBe(false);
+    expect(stored.rate_source).toBe("period_base");
+    expect(stored.amount).toBe(180); // 6 × 30
+  });
+
   it("тип со своей ставкой не получает воскресный множитель и объясняет почему", async () => {
     // Раздел 6.2: у pinned-типа множителя нет вовсе. До блока 4 ветка была
     // недостижима, и такой тип получал 8 × 55 × 2 = 880 за воскресенье.

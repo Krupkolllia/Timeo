@@ -242,6 +242,17 @@ describe("deleteDayType", () => {
     expect((await database.day_types.get(dayType.id))?.deleted_at).toBeNull();
   });
 
+  it("не считает ссылками записи другого пользователя", async () => {
+    // После миграции локальных данных при первом входе (блок 8) в базе
+    // окажутся строки под двумя user_id. Чужая запись отказывала бы в удалении
+    // без объяснения.
+    const database = openDb();
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id, { id: "e-other-user", user_id: "user-2" });
+
+    expect((await deleteDayType(database, dayType.id)).deleted).toBe(true);
+  });
+
   it("отказывает и из-за мягко удалённой записи: её ещё держит окно отмены", async () => {
     const database = openDb();
     const dayType = await createDayType(database, USER, draft());
@@ -263,13 +274,28 @@ describe("deleteDayType", () => {
 });
 
 describe("reorderDayTypes", () => {
+  it("перенумеровывает и мягко удалённые типы: иначе отмена удаления даёт два одинаковых номера", async () => {
+    const database = openDb();
+    const a = await createDayType(database, USER, draft({ name: "A" }));
+    const b = await createDayType(database, USER, draft({ name: "B" }));
+    const c = await createDayType(database, USER, draft({ name: "C" }));
+    await deleteDayType(database, b.id);
+
+    // Экран удалённый тип не видит и в порядке его не присылает.
+    await reorderDayTypes(database, USER, [c.id, a.id]);
+    await restoreDayType(database, b.id);
+
+    const orders = (await listDayTypes(database, USER)).map((row) => row.sort_order);
+    expect(new Set(orders).size).toBe(orders.length);
+  });
+
   it("переставляет типы в заданном порядке", async () => {
     const database = openDb();
     const a = await createDayType(database, USER, draft({ name: "A" }));
     const b = await createDayType(database, USER, draft({ name: "B" }));
     const c = await createDayType(database, USER, draft({ name: "C" }));
 
-    await reorderDayTypes(database, [c.id, a.id, b.id]);
+    await reorderDayTypes(database, USER, [c.id, a.id, b.id]);
 
     const rows = await listDayTypes(database, USER);
     expect(rows.map((r) => r.name)).toEqual(["C", "A", "B"]);
@@ -353,6 +379,57 @@ describe("countDayTypeChangeTargets / applyDayTypeChange (раздел 6.7)", ()
     await applyDayTypeChange(database, USER, { ...SCOPE, dayTypeId: dayType.id });
     // Правило праздника заменяет множитель типа дня, а не перемножается с ним.
     expect((await database.entries.get("e-1"))?.multiplier).toBe(2.5);
+  });
+
+  it("обновляет записи pinned-типа и во второй раз (флаг ручной ставки поставил сам механизм)", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id);
+    const scope = { ...SCOPE, dayTypeId: dayType.id };
+
+    await updateDayType(database, dayType.id, { rate_mode: "pinned", default_rate: 50 });
+    expect(await applyDayTypeChange(database, USER, scope)).toBe(1);
+    expect((await database.entries.get("e-1"))?.amount).toBe(400);
+
+    // Вторая правка той же ставки: без исключения по rate_source запись уже
+    // помечена rate_is_manual и молча выпадала бы из пересчёта навсегда.
+    await updateDayType(database, dayType.id, { default_rate: 60 });
+    expect(await countDayTypeChangeTargets(database, USER, scope)).toBe(1);
+    expect(await applyDayTypeChange(database, USER, scope)).toBe(1);
+    expect((await database.entries.get("e-1"))?.amount).toBe(480);
+  });
+
+  it("возвращает записи к базовой ставке, когда замок открывают обратно", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id);
+    const scope = { ...SCOPE, dayTypeId: dayType.id };
+
+    await updateDayType(database, dayType.id, { rate_mode: "pinned", default_rate: 50 });
+    await applyDayTypeChange(database, USER, scope);
+
+    await updateDayType(database, dayType.id, { rate_mode: "multiplier" });
+    await applyDayTypeChange(database, USER, scope);
+
+    const entry = await database.entries.get("e-1");
+    expect(entry?.rate_per_hour).toBe(30);
+    expect(entry?.rate_is_manual).toBe(false);
+    expect(entry?.rate_source).toBe("period_base");
+    expect(entry?.amount).toBe(240);
+  });
+
+  it("по-прежнему не трогает ставку, вписанную человеком", async () => {
+    const database = openDb();
+    await seedPeriod(database);
+    const dayType = await createDayType(database, USER, draft());
+    await seedEntry(database, dayType.id, { rate_is_manual: true, rate_source: "manual", rate_per_hour: 50, amount: 400 });
+
+    await updateDayType(database, dayType.id, { rate_mode: "pinned", default_rate: 70 });
+
+    expect(await countDayTypeChangeTargets(database, USER, { ...SCOPE, dayTypeId: dayType.id })).toBe(0);
+    expect((await database.entries.get("e-1"))?.amount).toBe(400);
   });
 
   it("возвращает ноль, когда типа дня или периода нет", async () => {
