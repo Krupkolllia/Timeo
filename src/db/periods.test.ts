@@ -606,3 +606,48 @@ describe("closePeriod / reopenPeriod", () => {
     expect(await hasClosedPeriods(database, USER)).toBe(false);
   });
 });
+
+describe("защитные ветки слоя периодов", () => {
+  it("мягко удалённый период не считается предыдущим", async () => {
+    // Иначе новый период скопировал бы ставку у строки, которой для всех
+    // остальных запросов уже не существует (инвариант 38).
+    const database = openDb();
+    const july = await getOrCreatePeriod(database, "user-1", 2026, 7, settings);
+    await database.periods.update(july.id, { base_rate: 99, deleted_at: "2026-07-31T00:00:00.000Z" });
+
+    const august = await getOrCreatePeriod(database, "user-1", 2026, 8, settings);
+    expect(august.base_rate).toBe(25);
+  });
+
+  it("смена ставки несуществующего периода ничего не меняет и не считается закрытием", async () => {
+    const database = openDb();
+    const result = await applyBaseRateChange(database, "user-1", {
+      year: 2026,
+      month: 8,
+      newBaseRate: 40,
+      mode: "recalculate_period",
+      fromDateISO: null,
+      periodStartDay: 1,
+    });
+
+    expect(result).toEqual({ updatedEntries: 0, skippedClosed: false });
+    expect(await database.periods.count()).toBe(0);
+  });
+
+  it("переоткрытие открытого или несуществующего периода ничего не делает", async () => {
+    const database = openDb();
+    await getOrCreatePeriod(database, "user-1", 2026, 8, settings);
+
+    await reopenPeriod(database, "user-1", 2026, 8);
+    const open = await database.periods.where({ user_id: "user-1", year: 2026, month: 8 }).first();
+    expect(open?.is_closed).toBe(false);
+
+    await expect(reopenPeriod(database, "user-1", 2030, 1)).resolves.toBeUndefined();
+  });
+
+  it("правка несуществующего периода молча ничего не делает", async () => {
+    const database = openDb();
+    await expect(updatePeriod(database, "нет-такого-периода", { norm_hours: 10 })).resolves.toBeUndefined();
+    expect(await database.periods.count()).toBe(0);
+  });
+});

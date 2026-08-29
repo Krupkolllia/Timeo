@@ -410,4 +410,85 @@ describe("TimeoDB schema migration", () => {
 
     upgraded.close();
   });
+
+  it("defaults a missing period_start_day and survives a malformed entry date", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    // Строка настроек, записанная ещё до появления поля.
+    const settings = legacySettings();
+    delete (settings as Record<string, unknown>).period_start_day;
+    await legacy.table("settings").add(settings);
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 30 }));
+    await legacy.table("entries").bulkAdd([
+      legacyEntry({ id: "ok", hours: 8, multiplier: 1.667, rate_per_hour: 50, rate_is_manual: true, amount: 400 }),
+      // Дата, из которой период не вывести: миграция обязана не считать такую
+      // запись закрытой и не падать на ней.
+      legacyEntry({
+        id: "broken-date",
+        date: "не-дата",
+        hours: 8,
+        multiplier: 1.667,
+        rate_per_hour: 50,
+        rate_is_manual: true,
+        amount: 400,
+      }),
+    ]);
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.entries.get("ok"))?.multiplier).toBe(1);
+    expect((await upgraded.entries.get("broken-date"))?.multiplier).toBe(1);
+
+    upgraded.close();
+  });
+
+  it("leaves an auto-rate entry alone when the period base rate no longer reconciles", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    // Базовая ставка периода с тех пор изменилась: подставлять её в запись
+    // задним числом значило бы придумать число, которого там не было.
+    await legacy.table("periods").add(legacyPeriod({ base_rate: 50 }));
+    await legacy.table("entries").add(
+      legacyEntry({ id: "auto", hours: 8, multiplier: 1.5, rate_per_hour: 45, rate_is_manual: false, amount: 360 }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const entry = await upgraded.entries.get("auto");
+    expect(entry?.rate_per_hour).toBe(45);
+    expect(entry?.amount).toBe(360);
+
+    upgraded.close();
+  });
+
+  it("leaves an auto-rate entry alone when its period row is missing", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("entries").add(
+      legacyEntry({ id: "auto", hours: 8, multiplier: 1.5, rate_per_hour: 45, rate_is_manual: false, amount: 360 }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    expect((await upgraded.entries.get("auto"))?.rate_per_hour).toBe(45);
+
+    upgraded.close();
+  });
 });
