@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import { TabBar } from "@/components/TabBar";
@@ -6,6 +7,7 @@ import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { hasClosedPeriods } from "@/db/periods";
 import { setPeriodStartDay, updateSettings } from "@/db/settings";
+import { periodForDate } from "@/lib/calc/period";
 import type { PeriodNaming, Theme } from "@/types/models";
 import { ru } from "@/i18n/ru";
 
@@ -48,10 +50,43 @@ function Toggle({
   );
 }
 
+// Свой текстовый буфер, как у NumberInput: без него быстрый ввод теряет
+// символы — Dexie-запись первой буквы успевает откликнуться через
+// useLiveQuery и перерисовать поле старым однобуквенным значением раньше,
+// чем человек допечатает остальное.
+function CurrencyInput({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const [text, setText] = useState(value);
+
+  useEffect(() => {
+    if (text !== value) setText(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <input
+      aria-label={ru.settings.currencyCustom}
+      placeholder={ru.settings.currencyCustom}
+      className="w-full rounded-lg bg-app-bg px-2 py-3 text-sm"
+      value={text}
+      onChange={(e) => {
+        const next = e.target.value.slice(0, 5);
+        setText(next);
+        onChange(next);
+      }}
+    />
+  );
+}
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
   const periodLocked = useLiveQuery(() => hasClosedPeriods(db, userId), []) ?? false;
+  const [raceBlockedNotice, setRaceBlockedNotice] = useState(false);
+  useEffect(() => {
+    if (!raceBlockedNotice) return;
+    const timeout = setTimeout(() => setRaceBlockedNotice(false), 4000);
+    return () => clearTimeout(timeout);
+  }, [raceBlockedNotice]);
 
   return (
     <div className="min-h-dvh bg-app-bg p-4 text-app-fg" style={{ paddingBottom: "calc(var(--tabbar-h) + 1rem)" }}>
@@ -87,7 +122,14 @@ export function SettingsPage() {
             <p className="text-xs text-app-fg/40">{ru.settings.newPeriodsHint}</p>
             <button
               className="-my-2 min-h-11 self-start px-0 text-sm font-semibold text-app-accent-text"
-              onClick={() => navigate("/period")}
+              onClick={() => {
+                // Явные year/month, а не голый "/period": пустые параметры
+                // читаются экраном периода как «открыт вкладкой» (часть 2.3) и
+                // прячут кнопку «назад» — отсюда это переход внутрь, а не по
+                // вкладке, и назад должен вести обратно в настройки.
+                const current = periodForDate(new Date(), settings.period_start_day);
+                navigate(`/period?year=${current.year}&month=${current.month}`);
+              }}
             >
               {ru.settings.currentPeriodRateLink}
             </button>
@@ -104,7 +146,15 @@ export function SettingsPage() {
                 inputMode="numeric"
                 className="mt-1 w-full rounded-lg bg-app-bg px-2 py-3 text-lg disabled:opacity-50"
                 value={settings.period_start_day}
-                onChange={(day) => void setPeriodStartDay(db, userId, settings.id, Math.trunc(day))}
+                onChange={(day) => {
+                  void setPeriodStartDay(db, userId, settings.id, Math.trunc(day)).then((result) => {
+                    // Между рендером незаблокированного поля и самой записью
+                    // период мог закрыться (другая вкладка, синхронизация) —
+                    // транзакция откажет молча, если это не показать: значение
+                    // в поле откатится само по useLiveQuery без объяснения.
+                    if (result.status === "blocked_closed_period") setRaceBlockedNotice(true);
+                  });
+                }}
               />
               {periodLocked ? (
                 <div className="mt-1 flex flex-col gap-1">
@@ -117,7 +167,9 @@ export function SettingsPage() {
                   </button>
                 </div>
               ) : (
-                <p className="mt-1 text-xs text-app-fg/40">{ru.settings.periodStartDayWarning}</p>
+                <p className="mt-1 text-xs text-app-fg/40">
+                  {raceBlockedNotice ? ru.settings.periodStartDayRaceBlocked : ru.settings.periodStartDayWarning}
+                </p>
               )}
             </div>
 
@@ -192,12 +244,9 @@ export function SettingsPage() {
                 </button>
               ))}
             </div>
-            <input
-              aria-label={ru.settings.currencyCustom}
-              placeholder={ru.settings.currencyCustom}
-              className="w-full rounded-lg bg-app-bg px-2 py-3 text-sm"
+            <CurrencyInput
               value={settings.currency}
-              onChange={(e) => void updateSettings(db, settings.id, { currency: e.target.value.slice(0, 5) })}
+              onChange={(currency) => void updateSettings(db, settings.id, { currency })}
             />
           </Section>
 

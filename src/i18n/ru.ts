@@ -37,6 +37,7 @@ export const ru = {
     periodStartDayLocked: "День начала периода изменить нельзя, пока есть закрытые месяцы.",
     periodStartDayList: "Список периодов",
     periodStartDayWarning: "При сохранении дни переедут в другие месяцы. Уже сохранённые записи не переписываются.",
+    periodStartDayRaceBlocked: "Не сохранено: за это время появился закрытый период",
     periodNaming: "Название периода",
     periodNamingByStartMonth: "По месяцу начала",
     periodNamingByEndMonth: "По месяцу конца",

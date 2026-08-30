@@ -838,7 +838,7 @@ export function DayScreen({
               <span
                 aria-hidden
                 className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-semibold text-app-accent-fg ${
-                  isSelected ? "ring-2 ring-white" : ""
+                  isSelected ? "ring-2 ring-app-fg" : ""
                 }`}
                 style={{ backgroundColor: dt.color }}
               >

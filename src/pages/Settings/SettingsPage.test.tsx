@@ -142,6 +142,20 @@ describe("SettingsPage", () => {
     await waitFor(async () => expect((await db.settings.get("s-local"))?.currency).toBe("zł.lo"));
   });
 
+  it("своё поле валюты не откатывается к эху предыдущей буквы (свой буфер, как у NumberInput)", async () => {
+    await seedSettings({ currency: "PLN" });
+    renderSettings();
+
+    const custom = await screen.findByLabelText(ru.settings.currencyCustom);
+    fireEvent.change(custom, { target: { value: "z" } });
+    await waitFor(async () => expect((await db.settings.get("s-local"))?.currency).toBe("z"));
+    fireEvent.change(custom, { target: { value: "zl" } });
+    await waitFor(async () => expect((await db.settings.get("s-local"))?.currency).toBe("zl"));
+    fireEvent.change(custom, { target: { value: "zlo" } });
+    await waitFor(async () => expect((await db.settings.get("s-local"))?.currency).toBe("zlo"));
+    expect(custom).toHaveValue("zlo");
+  });
+
   it("тема применяется мгновенно", async () => {
     await seedSettings({ theme: "system" });
     renderSettings();
@@ -179,6 +193,14 @@ describe("SettingsPage", () => {
     const timeInput = screen.getByLabelText(ru.settings.reminderTime);
     fireEvent.change(timeInput, { target: { value: "07:45" } });
     await waitFor(async () => expect((await db.settings.get("s-local"))?.reminder_time).toBe("07:45"));
+  });
+
+  it("«Ставка текущего периода» ведёт с явными year/month, а не голым /period", async () => {
+    await seedSettings({ period_start_day: 1 });
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole("button", { name: ru.settings.currentPeriodRateLink }));
+    expect(screen.getByTestId("location").textContent).toMatch(/^\/period\?year=\d+&month=\d+$/);
   });
 
   it("ссылки на типы дня и праздники несут return=/settings", async () => {

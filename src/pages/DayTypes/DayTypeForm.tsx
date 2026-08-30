@@ -142,7 +142,7 @@ export function DayTypeForm({
                 aria-label={color}
                 aria-pressed={draft.color === color}
                 onClick={() => patch({ color })}
-                className={`h-11 w-11 rounded-full ${draft.color === color ? "ring-2 ring-white" : ""}`}
+                className={`h-11 w-11 rounded-full ${draft.color === color ? "ring-2 ring-app-fg" : ""}`}
                 style={{ backgroundColor: color }}
               />
             ))}
