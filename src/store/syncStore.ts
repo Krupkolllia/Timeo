@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AuthAccount } from "@/lib/sync/auth";
+import type { AuthAccount, AuthErrorCode } from "@/lib/sync/auth";
 import type { DataSummary } from "@/db/account";
 import type { BackupFile } from "@/lib/export/backup";
 import { isCloudConfigured } from "@/lib/sync/auth";
@@ -41,6 +41,12 @@ interface SyncState {
   lastError: string | null;
   choice: FirstSignInChoice | null;
   differentUser: DifferentUserWarning | null;
+  /**
+   * Чем кончилась последняя попытка входа через провайдера. Живёт в store, а не
+   * в экране: возврат разбирается на запуске приложения, а прочитать результат
+   * должен экран аккаунта — возможно, открытый уже после этого.
+   */
+  signInError: AuthErrorCode | null;
   busy: boolean;
   set: (patch: Partial<Omit<SyncState, "set">>) => void;
 }
@@ -55,6 +61,7 @@ export const useSyncStore = create<SyncState>((set) => ({
   lastError: null,
   choice: null,
   differentUser: null,
+  signInError: null,
   busy: false,
   set: (patch) => set(patch),
 }));

@@ -33,6 +33,7 @@ export const ru = {
     email: "Почта",
     password: "Пароль",
     signIn: "Войти",
+    signInGoogle: "Войти через Google",
     signUp: "Создать аккаунт",
     signOut: "Выйти",
     signOutHint: "Данные с телефона не удаляются — синхронизация просто останавливается",
@@ -48,6 +49,9 @@ export const ru = {
     errorNetwork: "Нет связи с облаком. Данные на телефоне целы, попробуйте позже",
     errorNoCloud: "Облако в этой сборке не настроено",
     errorUnknown: "Не получилось. Данные на телефоне целы",
+    errorOauthCancelled: "Вход через Google отменён. Ничего не изменилось, данные на телефоне целы",
+    errorOauthFailed:
+      "Вход через Google не завершён. Если Google открылся в Safari, вернитесь в Timeo с домашнего экрана и попробуйте ещё раз. Данные на телефоне целы",
     errorEmptyEmail: "Введите почту",
     errorEmptyPassword: "Введите пароль",
     choiceTitle: "В облаке уже есть данные",

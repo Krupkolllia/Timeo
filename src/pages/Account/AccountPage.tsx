@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
 import { cloudGateway } from "@/lib/sync/cloud";
-import { signInWithPassword, signOut, signUpWithPassword, type AuthErrorCode } from "@/lib/sync/auth";
+import { signInWithGoogle, signInWithPassword, signOut, signUpWithPassword, type AuthErrorCode } from "@/lib/sync/auth";
 import { completeFirstSignIn, confirmDifferentUser, handleAccountChange, runSync } from "@/lib/sync/controller";
 import { useSyncStore } from "@/store/syncStore";
 import type { DataSummary } from "@/db/account";
@@ -19,6 +19,10 @@ function errorText(code: AuthErrorCode): string {
       return ru.account.errorNetwork;
     case "no_cloud":
       return ru.account.errorNoCloud;
+    case "oauth_cancelled":
+      return ru.account.errorOauthCancelled;
+    case "oauth_failed":
+      return ru.account.errorOauthFailed;
     case "unknown":
       return ru.account.errorUnknown;
   }
@@ -45,6 +49,9 @@ export function AccountPage() {
   const lastError = useSyncStore((state) => state.lastError);
   const choice = useSyncStore((state) => state.choice);
   const differentUser = useSyncStore((state) => state.differentUser);
+  // Возврат от провайдера разбирается на запуске приложения, а не здесь: экран
+  // только показывает, чем та попытка кончилась.
+  const signInError = useSyncStore((state) => state.signInError);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,6 +64,7 @@ export function AccountPage() {
   async function submit(kind: "in" | "up") {
     if (busy) return;
     setFieldError(null);
+    useSyncStore.getState().set({ signInError: null });
     if (!email.trim()) {
       setFieldError(ru.account.errorEmptyEmail);
       return;
@@ -84,6 +92,28 @@ export function AccountPage() {
       // права: на скриншоте с телефона «ничего не произошло» неотличимо от
       // сломанной сборки (раздел 12).
       setFieldError(`${ru.account.errorUnknown} ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Вход через Google уводит браузер наружу, поэтому здесь всё кончается либо
+   * уходом со страницы, либо сообщением рядом с кнопкой. Локальной базы эта
+   * кнопка не касается вовсе.
+   */
+  async function startGoogle() {
+    if (busy) return;
+    setFieldError(null);
+    setBusy(true);
+    useSyncStore.getState().set({ signInError: null });
+    try {
+      const result = await signInWithGoogle(`${window.location.origin}/more/account`);
+      if (!result.ok) useSyncStore.getState().set({ signInError: result.code });
+    } catch {
+      // Исключение вместо отказа — тоже исход, и молчать о нём нельзя: на
+      // скриншоте «ничего не произошло» неотличимо от сломанной сборки.
+      useSyncStore.getState().set({ signInError: "oauth_failed" });
     } finally {
       setBusy(false);
     }
@@ -298,6 +328,22 @@ export function AccountPage() {
                   >
                     {ru.account.signUp}
                   </button>
+                  <button
+                    className="min-h-11 w-full rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20 disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => void startGoogle()}
+                  >
+                    {ru.account.signInGoogle}
+                  </button>
+                  {/* Отказ провайдера — словами рядом с кнопкой, а не модалкой
+                      и не молчанием (инварианты 54 и 58). Место под него не
+                      резервируется: сообщение появляется на запуске приложения
+                      после возврата, а не под уже занесённым пальцем. */}
+                  {signInError && (
+                    <p className="text-xs text-app-fg/70" role="status">
+                      {errorText(signInError)}
+                    </p>
+                  )}
                 </div>
               </>
             )}
