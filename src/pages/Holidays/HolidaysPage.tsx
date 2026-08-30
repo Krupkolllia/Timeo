@@ -135,7 +135,7 @@ export function HolidaysPage() {
 
   if (!settings || holidays === undefined) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-white/50">{ru.calendar.loading}</div>
+      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-app-fg/50">{ru.calendar.loading}</div>
     );
   }
 
@@ -144,10 +144,10 @@ export function HolidaysPage() {
   // шапка с кнопкой «назад» уезжает за верхний край. Список тут длинный —
   // тринадцать праздников на год.
   return (
-    <div className="flex h-dvh flex-col bg-app-bg text-white">
+    <div className="flex h-dvh flex-col bg-app-bg text-app-fg">
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
-          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
+          className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
           onClick={() => {
             if (!formOpen) {
               navigate(returnTo);
@@ -168,7 +168,7 @@ export function HolidaysPage() {
       {formOpen ? (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-6">
           <div>
-            <label className="text-xs text-white/50" htmlFor="holiday-date">
+            <label className="text-xs text-app-fg/50" htmlFor="holiday-date">
               {ru.holidays.date}
             </label>
             {/* type="date" отдаёт ровно YYYY-MM-DD и не проходит через UTC
@@ -176,19 +176,19 @@ export function HolidaysPage() {
             <input
               id="holiday-date"
               type="date"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3"
               value={draftDate}
               onChange={(event) => handleDateChange(event.target.value)}
             />
           </div>
           <div>
-            <label className="text-xs text-white/50" htmlFor="holiday-name">
+            <label className="text-xs text-app-fg/50" htmlFor="holiday-name">
               {ru.holidays.name}
             </label>
             <input
               id="holiday-name"
               type="text"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3"
               placeholder={ru.holidays.namePlaceholder}
               value={draftName}
               onChange={(event) => setDraftName(event.target.value)}
@@ -196,7 +196,7 @@ export function HolidaysPage() {
           </div>
           {/* Высота зарезервирована всегда: строка, появляющаяся по совпадению
               даты, иначе двигала бы кнопку сохранения под пальцем. */}
-          <p className={`text-xs text-white/40 ${emptyDateWarning || duplicateWarning ? "" : "invisible"}`}>
+          <p className={`text-xs text-app-fg/40 ${emptyDateWarning || duplicateWarning ? "" : "invisible"}`}>
             {emptyDateWarning
               ? `${ru.holidays.emptyDateWarning} ${formatDayShort(lastValidDate)}`
               : ru.holidays.duplicateWarning}
@@ -205,60 +205,60 @@ export function HolidaysPage() {
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6">
           <section>
-            <h2 className="text-xs text-white/40">{ru.holidays.multipliersTitle}</h2>
+            <h2 className="text-xs text-app-fg/40">{ru.holidays.multipliersTitle}</h2>
             <div className="mt-2 grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-white/50" htmlFor="multiplier-saturday">
+                <label className="text-xs text-app-fg/50" htmlFor="multiplier-saturday">
                   {ru.holidays.multiplierSaturday}
                 </label>
                 <NumberInput
                   id="multiplier-saturday"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
+                  className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-lg"
                   value={settings.weekend_multipliers.saturday}
                   onChange={(value) => handleMultiplierChange({ saturday: value })}
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50" htmlFor="multiplier-sunday">
+                <label className="text-xs text-app-fg/50" htmlFor="multiplier-sunday">
                   {ru.holidays.multiplierSunday}
                 </label>
                 <NumberInput
                   id="multiplier-sunday"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
+                  className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-lg"
                   value={settings.weekend_multipliers.sunday}
                   onChange={(value) => handleMultiplierChange({ sunday: value })}
                 />
               </div>
               <div>
-                <label className="text-xs text-white/50" htmlFor="multiplier-holiday">
+                <label className="text-xs text-app-fg/50" htmlFor="multiplier-holiday">
                   {ru.holidays.multiplierHoliday}
                 </label>
                 <NumberInput
                   id="multiplier-holiday"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
+                  className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-lg"
                   value={settings.weekend_multipliers.holiday}
                   onChange={(value) => handleMultiplierChange({ holiday: value })}
                 />
               </div>
             </div>
-            <p className="mt-2 text-xs text-white/40">{ru.holidays.multipliersNote}</p>
+            <p className="mt-2 text-xs text-app-fg/40">{ru.holidays.multipliersNote}</p>
           </section>
 
-          {byYear.length === 0 && <p className="text-sm text-white/40">{ru.holidays.empty}</p>}
+          {byYear.length === 0 && <p className="text-sm text-app-fg/40">{ru.holidays.empty}</p>}
 
           {byYear.map(([year, rows]) => (
             <section key={year}>
-              <h2 className="text-xs text-white/40">{year}</h2>
+              <h2 className="text-xs text-app-fg/40">{year}</h2>
               <ul className="mt-2 flex flex-col gap-2">
                 {rows.map((holiday) => (
-                  <li key={holiday.id} className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2">
-                    <span className="w-20 shrink-0 text-xs text-white/50">{formatDayShort(holiday.date)}</span>
+                  <li key={holiday.id} className="flex items-center gap-3 rounded-xl bg-app-fg/5 px-3 py-2">
+                    <span className="w-20 shrink-0 text-xs text-app-fg/50">{formatDayShort(holiday.date)}</span>
                     {/* min-w-0 + truncate: имя пользовательское и произвольной
                         длины, кнопка удаления за край уезжать не должна
                         (инвариант 26). */}
                     <span className="min-w-0 flex-1 truncate text-sm">{holiday.name}</span>
                     <button
-                      className="-mr-2 min-h-11 shrink-0 px-3 text-xs text-white/40 active:text-white/70"
+                      className="-mr-2 min-h-11 shrink-0 px-3 text-xs text-app-fg/40 active:text-app-fg/70"
                       aria-label={`${ru.holidays.delete}: ${holiday.name || holiday.date}`}
                       onClick={() => void handleDelete(holiday)}
                     >
@@ -273,9 +273,9 @@ export function HolidaysPage() {
       )}
 
       {/* Основное действие — в нижней части экрана (инвариант 59). */}
-      <div className="shrink-0 border-t border-white/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="shrink-0 border-t border-app-fg/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <button
-          className="min-h-11 w-full rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+          className="min-h-11 w-full rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
           onClick={() => (formOpen ? void handleSave() : openForm(addDate ?? toISODate(new Date())))}
         >
           {formOpen ? ru.holidays.save : ru.holidays.add}
@@ -285,10 +285,10 @@ export function HolidaysPage() {
       {/* Плашка отмены сверху, как на календаре и в типах дня: низ занят
           основным действием. */}
       {pendingUndo && (
-        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
+        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 flex items-center justify-between gap-3 rounded-xl bg-app-surface-2 px-4 py-2 shadow-lg">
           <span className="min-w-0 truncate text-sm">{ru.holidays.deleted}</span>
           <button
-            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent"
+            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent-text"
             onClick={() => void handleUndoDelete()}
           >
             {ru.holidays.undo}

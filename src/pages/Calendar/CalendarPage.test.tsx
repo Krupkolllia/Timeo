@@ -613,8 +613,8 @@ describe("CalendarPage — праздники (раздел 8.1)", () => {
     expect(holidayCell.className).toContain("text-app-holiday");
     // Суббота остаётся жёлтой, будень — белым: три состояния различимы.
     // 22-е, а не 15-е: 15 августа — засеянный праздник, и его подпись другая.
-    expect(dayCell("2026-08-22").className).toContain("text-app-accent");
-    expect(dayCell("2026-08-11").className).toContain("text-white");
+    expect(dayCell("2026-08-22").className).toContain("text-app-accent-text");
+    expect(dayCell("2026-08-11").className).toContain("text-app-fg");
   });
 
   it("мягко удалённый праздник не красит ячейку (инвариант 38)", async () => {

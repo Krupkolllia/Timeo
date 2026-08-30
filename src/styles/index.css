@@ -2,11 +2,35 @@
 
 @theme {
   --color-app-bg: #0f172a;
+  --color-app-surface: #0f172a;
+  --color-app-surface-2: #1e293b;
+  --color-app-fg: #ffffff;
   --color-app-accent: #facc15;
+  --color-app-accent-fg: #0f172a;
+  --color-app-accent-text: #facc15;
+  --color-app-scrim: #000000;
   /* Раздел 8.1: праздник отличается и от будня, и от выходного. Выходной уже
      жёлтый, поэтому праздник — розовый: воскресный праздник иначе неотличим
      от обычного воскресенья, а множитель у него другой. */
   --color-app-holiday: #fb7185;
+}
+
+/* Блок 7, часть 1: светлая тема переопределяет семантические токены. data-theme
+   всегда явный ("light"/"dark"), даже при settings.theme === "system" — см.
+   src/app/useTheme.ts. Два токена акцента не сливаются в один: --color-app-accent
+   остаётся жёлтым фоном кнопки в обеих темах (с тёмным текстом поверх, через
+   accent-fg), а --color-app-accent-text — это акцент КАК текст на фоне экрана,
+   и на белом фоне он должен потемнеть, иначе нечитаем. */
+:root[data-theme="light"] {
+  --color-app-bg: #f8fafc;
+  --color-app-surface: #ffffff;
+  --color-app-surface-2: #f1f5f9;
+  --color-app-fg: #0f172a;
+  --color-app-accent: #facc15;
+  --color-app-accent-fg: #0f172a;
+  --color-app-accent-text: #b45309;
+  --color-app-scrim: #000000;
+  --color-app-holiday: #e11d48;
 }
 
 html,

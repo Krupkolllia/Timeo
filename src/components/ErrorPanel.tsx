@@ -25,23 +25,23 @@ function errorMessage(error: unknown): string {
 
 export function ErrorPanel({ error }: { error: unknown }) {
   return (
-    <div className="flex min-h-dvh flex-col justify-center gap-4 bg-app-bg p-6 text-white">
+    <div className="flex min-h-dvh flex-col justify-center gap-4 bg-app-bg p-6 text-app-fg">
       <p className="text-lg font-semibold">{ru.error.title}</p>
-      <p className="text-sm text-white/50">{ru.error.body}</p>
+      <p className="text-sm text-app-fg/50">{ru.error.body}</p>
       {/* Текст ошибки — то, что пользователь перешлёт скриншотом, поэтому он
           виден целиком и переносится, а не обрезается: break-words обязателен,
           иначе длинный стек одной строкой распирает экран по горизонтали
           (инвариант 26). */}
-      <p className="max-h-48 overflow-y-auto break-words rounded-lg bg-white/5 px-3 py-2 font-mono text-xs text-white/70">
+      <p className="max-h-48 overflow-y-auto break-words rounded-lg bg-app-fg/5 px-3 py-2 font-mono text-xs text-app-fg/70">
         {errorMessage(error)}
       </p>
-      <p className="text-xs text-white/30">
+      <p className="text-xs text-app-fg/30">
         v{__APP_VERSION__}
         {__BUILD_SHA__ && ` · ${__BUILD_SHA__}`}
       </p>
       {/* Кнопка внизу и на всю ширину — экран одноручный (инвариант 59). */}
       <button
-        className="min-h-11 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+        className="min-h-11 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
         onClick={() => window.location.reload()}
       >
         {ru.error.reload}

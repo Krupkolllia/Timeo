@@ -10,17 +10,17 @@ export function SettingsPage() {
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
 
   return (
-    <div className="min-h-dvh bg-app-bg p-4 text-white">
+    <div className="min-h-dvh bg-app-bg p-4 text-app-fg">
       {/*
        * Раздел 6.5 ТЗ. Экрана настроек (блок 7) ещё нет — эта единственная
        * настройка временно живёт на заглушке, как раньше settings.show_shift_times
        * жил в модели без своего переключателя до появления кнопки в шторке дня.
        */}
       {settings && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2">
           <div className="min-w-0">
             <p className="text-sm">{ru.settings.totalHoursPaidOnlyToggle}</p>
-            <p className="mt-1 text-xs text-white/40">{ru.settings.totalHoursPaidOnlyHint}</p>
+            <p className="mt-1 text-xs text-app-fg/40">{ru.settings.totalHoursPaidOnlyHint}</p>
           </div>
           <button
             role="switch"
@@ -33,7 +33,7 @@ export function SettingsPage() {
           >
             <span
               className={`relative block h-6 w-11 rounded-full transition-colors ${
-                settings.total_hours_paid_only ? "bg-app-accent" : "bg-white/20"
+                settings.total_hours_paid_only ? "bg-app-accent" : "bg-app-fg/20"
               }`}
             >
               <span
@@ -45,7 +45,7 @@ export function SettingsPage() {
           </button>
         </div>
       )}
-      <p className="text-xs text-white/40">
+      <p className="text-xs text-app-fg/40">
         {ru.settings.version} {__APP_VERSION__}
       </p>
     </div>

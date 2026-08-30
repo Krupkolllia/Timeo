@@ -128,10 +128,10 @@ export function ExportRestorePage() {
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-app-bg text-white">
+    <div className="flex h-dvh flex-col bg-app-bg text-app-fg">
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
-          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
+          className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
           onClick={goBack}
           aria-label={ru.backup.back}
         >
@@ -142,10 +142,10 @@ export function ExportRestorePage() {
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
         <section>
-          <h2 className="text-xs text-white/40">{ru.backup.exportTitle}</h2>
-          <p className="mt-1 text-xs text-white/40">{ru.backup.exportNote}</p>
+          <h2 className="text-xs text-app-fg/40">{ru.backup.exportTitle}</h2>
+          <p className="mt-1 text-xs text-app-fg/40">{ru.backup.exportNote}</p>
           <button
-            className="mt-3 min-h-11 w-full rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80 disabled:opacity-50"
+            className="mt-3 min-h-11 w-full rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80 disabled:opacity-50"
             disabled={busy}
             onClick={() => void handleExport()}
           >
@@ -153,18 +153,18 @@ export function ExportRestorePage() {
           </button>
           {/* Высота строки исхода зарезервирована: появляясь после нажатия, она
               иначе сдвигала бы вниз весь раздел импорта. */}
-          <p className={`mt-2 min-h-8 text-xs ${exportStatus ? "text-white/60" : "text-transparent"}`}>
+          <p className={`mt-2 min-h-8 text-xs ${exportStatus ? "text-app-fg/60" : "text-transparent"}`}>
             {exportStatus ?? "—"}
           </p>
         </section>
 
         <section>
-          <h2 className="text-xs text-white/40">{ru.backup.importTitle}</h2>
-          <p className="mt-1 text-xs text-white/40">{ru.backup.importNote}</p>
+          <h2 className="text-xs text-app-fg/40">{ru.backup.importTitle}</h2>
+          <p className="mt-1 text-xs text-app-fg/40">{ru.backup.importNote}</p>
 
           {/* Обёртка label вокруг input: системная кнопка выбора файла не
               поддаётся оформлению, а цель нажатия должна быть 44px. */}
-          <label className="mt-3 flex min-h-11 w-full items-center justify-center rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20">
+          <label className="mt-3 flex min-h-11 w-full items-center justify-center rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20">
             {ru.backup.chooseFile}
             <input
               ref={fileInputRef}
@@ -177,16 +177,16 @@ export function ExportRestorePage() {
           </label>
 
           {/* Ошибка разбора: данные не изменились, и текст говорит именно это. */}
-          <p className={`mt-2 min-h-8 text-xs ${importError ? "text-white/60" : "text-transparent"}`}>
+          <p className={`mt-2 min-h-8 text-xs ${importError ? "text-app-fg/60" : "text-transparent"}`}>
             {importError ?? "—"}
           </p>
 
           {chosen && (
-            <div className="mt-1 flex flex-col gap-3 rounded-xl bg-white/5 px-3 py-3">
-              <p className="truncate text-xs text-white/50">
+            <div className="mt-1 flex flex-col gap-3 rounded-xl bg-app-fg/5 px-3 py-3">
+              <p className="truncate text-xs text-app-fg/50">
                 {ru.backup.fileChosen} {chosen.name}
               </p>
-              <p className="text-xs text-white/40">
+              <p className="text-xs text-app-fg/40">
                 {chosen.file.periods.length} {ru.backup.contentsPeriods} · {chosen.file.day_types.length}{" "}
                 {ru.backup.contentsDayTypes} · {chosen.file.entries.length} {ru.backup.contentsEntries} ·{" "}
                 {chosen.file.holidays.length} {ru.backup.contentsHolidays}
@@ -194,44 +194,44 @@ export function ExportRestorePage() {
               {/* Инвариант 47: два режима, и ни один не выбран заранее —
                   молчаливое слияние не бывает по умолчанию. */}
               <button
-                className="min-h-11 w-full rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20 disabled:opacity-50"
+                className="min-h-11 w-full rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20 disabled:opacity-50"
                 disabled={busy}
                 onClick={() => void runImport("merge")}
               >
                 {ru.backup.modeMerge}
               </button>
-              <p className="-mt-2 text-xs text-white/30">{ru.backup.modeMergeHint}</p>
+              <p className="-mt-2 text-xs text-app-fg/30">{ru.backup.modeMergeHint}</p>
               <button
-                className="min-h-11 w-full rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20 disabled:opacity-50"
+                className="min-h-11 w-full rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20 disabled:opacity-50"
                 disabled={busy}
                 onClick={() => setReplaceConfirmOpen(true)}
               >
                 {ru.backup.modeReplace}
               </button>
-              <p className="-mt-2 text-xs text-white/30">{ru.backup.modeReplaceHint}</p>
+              <p className="-mt-2 text-xs text-app-fg/30">{ru.backup.modeReplaceHint}</p>
             </div>
           )}
 
           {importCounts && (
-            <div className="mt-3 rounded-xl bg-white/5 px-3 py-3 text-xs text-white/60">
-              <p className="font-semibold text-white/80">{ru.backup.importedTitle}</p>
+            <div className="mt-3 rounded-xl bg-app-fg/5 px-3 py-3 text-xs text-app-fg/60">
+              <p className="font-semibold text-app-fg/80">{ru.backup.importedTitle}</p>
               <p className="mt-1">
                 {importCounts.periods} {ru.backup.contentsPeriods} · {importCounts.day_types}{" "}
                 {ru.backup.contentsDayTypes} · {importCounts.entries} {ru.backup.contentsEntries} ·{" "}
                 {importCounts.holidays} {ru.backup.contentsHolidays}
               </p>
               {importCounts.skipped > 0 && (
-                <p className="mt-1 text-white/40">
+                <p className="mt-1 text-app-fg/40">
                   {importCounts.skipped} {ru.backup.importedSkipped}
                 </p>
               )}
               {importCounts.repointed_entries > 0 && (
-                <p className="mt-1 text-white/40">
+                <p className="mt-1 text-app-fg/40">
                   {importCounts.repointed_entries} {ru.backup.importedRepointed}
                 </p>
               )}
               {importCounts.recovered_entries > 0 && (
-                <p className="mt-1 text-white/40">
+                <p className="mt-1 text-app-fg/40">
                   {importCounts.recovered_entries} {ru.backup.importedRecovered}
                 </p>
               )}
@@ -245,24 +245,24 @@ export function ExportRestorePage() {
           второй. */}
       {replaceConfirmOpen && (
         <div
-          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-app-scrim/60 p-6"
           onClick={() => setReplaceConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 text-white"
+            className="w-full max-w-sm rounded-2xl bg-app-surface p-4 text-app-fg"
             onClick={(event) => event.stopPropagation()}
           >
             <p className="text-base font-semibold">{ru.backup.replaceConfirmTitle}</p>
-            <p className="mt-2 text-sm text-white/50">{ru.backup.replaceConfirmBody}</p>
+            <p className="mt-2 text-sm text-app-fg/50">{ru.backup.replaceConfirmBody}</p>
             <div className="mt-4 flex gap-3">
               <button
-                className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+                className="min-h-11 flex-1 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
                 onClick={() => setReplaceConfirmOpen(false)}
               >
                 {ru.backup.cancel}
               </button>
               <button
-                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
                 onClick={() => {
                   setReplaceConfirmOpen(false);
                   void runImport("replace");

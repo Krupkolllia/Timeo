@@ -63,16 +63,16 @@ export function RateChangeDialog({
   );
 
   return (
-    <div className="day-sheet-overlay fixed inset-0 z-40 flex items-end bg-black/50" onClick={onCancel}>
+    <div className="day-sheet-overlay fixed inset-0 z-40 flex items-end bg-app-scrim/50" onClick={onCancel}>
       <div
-        className="day-sheet flex w-full flex-col gap-3 overflow-y-auto rounded-t-2xl bg-slate-900 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white"
+        className="day-sheet flex w-full flex-col gap-3 overflow-y-auto rounded-t-2xl bg-app-surface p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-app-fg"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-white/20" />
+        <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-app-fg/20" />
         <p className="text-base font-semibold">{ru.period.rateDialogTitle}</p>
         {/* Обе цифры рядом: без «было» новое число не с чем сравнить, а решение
             принимается именно по разнице. */}
-        <p className="text-sm text-white/50">
+        <p className="text-sm text-app-fg/50">
           {currentRate.toFixed(2)} → {newRate.toFixed(2)} {currency}
         </p>
 
@@ -84,20 +84,20 @@ export function RateChangeDialog({
               key={item}
               onClick={() => setMode(item)}
               aria-pressed={selected}
-              className={`rounded-xl px-3 py-3 text-left ${selected ? "bg-white/15" : "bg-white/5 active:bg-white/10"}`}
+              className={`rounded-xl px-3 py-3 text-left ${selected ? "bg-app-fg/15" : "bg-app-fg/5 active:bg-app-fg/10"}`}
             >
               <span className="block text-sm font-medium">{title}</span>
-              <span className="mt-0.5 block text-xs text-white/40">{hint}</span>
+              <span className="mt-0.5 block text-xs text-app-fg/40">{hint}</span>
               {/* Предупреждение серым и без запрета — раздел 9: режим остаётся
                   выбираемым, просто честно сказано, что он сделает. */}
-              {warning && <span className="mt-1 block text-xs text-white/60">{warning}</span>}
+              {warning && <span className="mt-1 block text-xs text-app-fg/60">{warning}</span>}
             </button>
           );
         })}
 
         {mode === "apply_from_date" && (
           <div>
-            <label className="text-xs text-white/50" htmlFor="rate-change-from-date">
+            <label className="text-xs text-app-fg/50" htmlFor="rate-change-from-date">
               {ru.period.fromDate}
             </label>
             {/* min/max ограничивают параметр операции, а не поле данных: раздел 9
@@ -107,7 +107,7 @@ export function RateChangeDialog({
             <input
               id="rate-change-from-date"
               type="date"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2"
               value={fromDate}
               min={periodStartISO}
               max={periodEndISO}
@@ -118,13 +118,13 @@ export function RateChangeDialog({
 
         <div className="mt-1 flex gap-3">
           <button
-            className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+            className="min-h-11 flex-1 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
             onClick={onCancel}
           >
             {ru.period.cancel}
           </button>
           <button
-            className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+            className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
             onClick={() => onApply(mode, mode === "apply_from_date" ? fromDate : null)}
           >
             {ru.period.apply}
