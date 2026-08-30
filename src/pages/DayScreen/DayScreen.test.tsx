@@ -159,19 +159,40 @@ describe("DayScreen — создание записи", () => {
 });
 
 describe("DayScreen — часы, множитель и ставка", () => {
-  it("шаг ±0.5 пересчитывает сумму и не уходит ниже нуля", async () => {
+  it("кнопок ±0.5 больше нет — поле часов правится только вводом", async () => {
     renderDay();
     fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
     await savedEntry();
 
-    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    expect(screen.queryByRole("button", { name: "+" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "−" })).toBeNull();
+  });
+
+  it("поле часов остаётся свободно редактируемым, включая ноль (раздел 9, инвариант 25)", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    await savedEntry();
+
+    type(fields().hours, "8.5");
     expect((await savedEntry()).hours).toBe(8.5);
     expect((await savedEntry()).amount).toBe(255);
 
-    const minus = screen.getByRole("button", { name: "−" });
-    for (let i = 0; i < 20; i++) fireEvent.click(minus);
+    type(fields().hours, "0");
     expect((await savedEntry()).hours).toBe(0);
     expect((await savedEntry()).amount).toBe(0);
+  });
+
+  it("инвариант 57: часы, отличающиеся от значения типа дня, помечаются", async () => {
+    renderDay();
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    await savedEntry();
+
+    // Свежий выбор типа дня — часы совпадают с default_hours, метки нет.
+    expect(screen.queryByText(ru.day.differsFromDayTypeDefault)).toBeNull();
+
+    type(fields().hours, "5");
+    await savedEntry();
+    expect(screen.getByText(ru.day.differsFromDayTypeDefault)).toBeInTheDocument();
   });
 
   it("правка множителя не трогает ставку", async () => {
@@ -763,6 +784,27 @@ describe("DayScreen — время смены", () => {
     type(screen.getByLabelText(ru.day.breakMinutes), " ");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect((await savedEntry()).break_minutes).not.toBeNaN();
+  });
+
+  it("оплачиваемый перерыв: сохраняется, уменьшает неоплачиваемую часть и показывает общее время смены", async () => {
+    renderDay({ settings: { show_shift_times: true } });
+    fireEvent.click(screen.getByRole("button", { name: "Рабочий день" }));
+    await savedEntry();
+
+    type(screen.getByLabelText(ru.day.startTime), "08:00");
+    type(screen.getByLabelText(ru.day.endTime), "16:00");
+    type(screen.getByLabelText(ru.day.breakMinutes), "60");
+    expect((await savedEntry()).hours).toBe(7);
+
+    // Оплачивается весь перерыв — часы возвращаются к общему времени смены.
+    type(screen.getByLabelText(ru.day.paidBreakMinutes), "60");
+    const entry = await savedEntry();
+    expect(entry.hours).toBe(8);
+    expect(entry.paid_break_minutes).toBe(60);
+    expect(screen.getByText(new RegExp(`${ru.day.totalShiftTime}: 8`))).toBeVisible();
+
+    type(screen.getByLabelText(ru.day.paidBreakMinutes), "");
+    expect((await savedEntry()).paid_break_minutes).toBeNull();
   });
 });
 

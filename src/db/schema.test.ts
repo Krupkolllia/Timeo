@@ -807,4 +807,67 @@ describe("TimeoDB schema migration", () => {
     expect(await upgraded.entries.count()).toBe(0);
     upgraded.close();
   });
+
+  it("version(9): день типа получает пустой шаблон времён, запись — paid_break_minutes=0, настройки — total_hours_paid_only=true", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    await legacy.table("settings").add(legacySettings());
+    await legacy.table("periods").add(
+      legacyPeriod({
+        id: "p-closed",
+        year: 2026,
+        month: 7,
+        is_closed: true,
+        closed_totals: { amount: 240, total_hours: 8, norm_hours_covered: 8 },
+      }),
+    );
+    await legacy.table("day_types").add(legacyDayType());
+    await legacy.table("entries").add(
+      legacyEntry({ id: "closed", date: "2026-07-10", hours: 8, amount: 240, break_minutes: 30 }),
+    );
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    // day_types: времена и перерыв по умолчанию — null (их не было ни у
+    // одного существующего типа), оплачиваемых минут перерыва — 0 (ни на что
+    // не влияет без времён, но поле определено).
+    const dayType = await upgraded.day_types.get("dt-1");
+    expect(dayType?.default_start).toBeNull();
+    expect(dayType?.default_end).toBeNull();
+    expect(dayType?.default_break_minutes).toBeNull();
+    expect(dayType?.default_break_paid_minutes).toBe(0);
+
+    // entries: paid_break_minutes=0 воспроизводит старую формулу буквально —
+    // ни hours, ни amount, ни updated_at, ни closed_totals не сдвинулись.
+    const entry = await upgraded.entries.get("closed");
+    expect(entry?.paid_break_minutes).toBe(0);
+    expect(entry?.hours).toBe(8);
+    expect(entry?.amount).toBe(240);
+    expect(entry?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    const closedPeriod = await upgraded.periods.get("p-closed");
+    expect(closedPeriod?.is_closed).toBe(true);
+    expect(closedPeriod?.closed_totals).toEqual({ amount: 240, total_hours: 8, norm_hours_covered: 8 });
+
+    // settings: итоги периода продолжают считаться по оплачиваемым часам, как
+    // и до появления этой настройки.
+    const settings = await upgraded.settings.get("s1");
+    expect(settings?.total_hours_paid_only).toBe(true);
+
+    upgraded.close();
+  });
+
+  it("version(9) на пустой базе ничего не создаёт", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+    expect(await upgraded.entries.count()).toBe(0);
+    expect(await upgraded.day_types.count()).toBe(0);
+    upgraded.close();
+  });
 });

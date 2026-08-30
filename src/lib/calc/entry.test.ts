@@ -27,6 +27,10 @@ function makeDayType(overrides: Partial<DayType> = {}): DayType {
     counts_as_work: true,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: false,
@@ -157,6 +161,48 @@ describe("buildEntryDefaultsForDayType", () => {
     expect(result.amount).toBe(160);
     expect(result.rate_source).toBe("period_base");
     expect(result.multiplier_source).toBe("default");
+  });
+
+  it("раздел 5.3: заданы оба времени типа дня — часы и перерыв выводятся из них", () => {
+    const dayType = makeDayType({
+      default_hours: 12, // должно быть проигнорировано: приоритет у времён
+      default_start: "08:00",
+      default_end: "16:00",
+      default_break_minutes: 30,
+      default_break_paid_minutes: 0,
+    });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.hours).toBe(7.5);
+    expect(result.start_time).toBe("08:00");
+    expect(result.end_time).toBe("16:00");
+    expect(result.break_minutes).toBe(30);
+    expect(result.paid_break_minutes).toBe(0);
+    expect(result.amount).toBe(150); // 7.5 × 20
+  });
+
+  it("раздел 5.3: оплачиваемый перерыв типа дня уменьшает неоплачиваемую часть уже в значениях по умолчанию", () => {
+    const dayType = makeDayType({
+      default_start: "08:00",
+      default_end: "16:00",
+      default_break_minutes: 60,
+      default_break_paid_minutes: 60,
+    });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.hours).toBe(8); // перерыв оплачен целиком — часы равны общему времени
+    expect(result.paid_break_minutes).toBe(60);
+  });
+
+  it("раздел 5.3: только одно время типа дня — работает default_hours, как и раньше", () => {
+    const dayType = makeDayType({ default_hours: 6, default_start: "08:00", default_end: null });
+    const result = buildEntryDefaultsForDayType(new Date(2026, 0, 5), dayType, period, undefined, weekendMultipliers);
+
+    expect(result.hours).toBe(6);
+    expect(result.start_time).toBeNull();
+    expect(result.end_time).toBeNull();
+    expect(result.break_minutes).toBeNull();
+    expect(result.paid_break_minutes).toBeNull();
   });
 
   it("подставляет воскресный множитель, не трогая ставку", () => {

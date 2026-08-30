@@ -134,6 +134,7 @@ describe("calculatePeriodTotals", () => {
       start_time: null,
       end_time: null,
       break_minutes: null,
+      paid_break_minutes: null,
       duration_is_manual: false,
       note: "",
       rate_source: "period_base",
@@ -165,6 +166,27 @@ describe("calculatePeriodTotals", () => {
     expect(totals.total_hours).toBe(8);
     expect(totals.norm_hours_covered).toBe(16);
     expect(totals.remaining_to_norm).toBe(144);
+  });
+
+  it("раздел 6.5: по умолчанию (settings.total_hours_paid_only) считает оплачиваемые часы, как и раньше", () => {
+    const dayTypeById = new Map([["work", workDayType]]);
+    // 7 оплачиваемых часов, 60 минут перерыва, из них 30 оплачивается —
+    // общее время смены было бы 7.5ч, но по умолчанию считаются именно 7.
+    const entries = [makeEntry({ day_type_id: "work", hours: 7, break_minutes: 60, paid_break_minutes: 30 })];
+
+    const totals = calculatePeriodTotals(makePeriod(), entries, dayTypeById);
+    expect(totals.total_hours).toBe(7);
+    expect(totals.norm_hours_covered).toBe(7);
+  });
+
+  it("раздел 6.5: total_hours_paid_only=false считает общее время смены, а не оплачиваемые часы", () => {
+    const dayTypeById = new Map([["work", workDayType]]);
+    const entries = [makeEntry({ day_type_id: "work", hours: 7, break_minutes: 60, paid_break_minutes: 30 })];
+
+    const totals = calculatePeriodTotals(makePeriod(), entries, dayTypeById, { total_hours_paid_only: false });
+    // worked=7 → totalShiftMinutesOf = 7×60 + 60 − 30 = 450 → 7.5ч.
+    expect(totals.total_hours).toBe(7.5);
+    expect(totals.norm_hours_covered).toBe(7.5);
   });
 
   it("rounds the accumulated total instead of leaking a float tail", () => {

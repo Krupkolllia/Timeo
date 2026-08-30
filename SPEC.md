@@ -147,6 +147,8 @@ One row per user.
 - `reminder_enabled`, `reminder_time`
 - `preferred_rate_change_mode` — remembered answer to the rate change dialog
 - `seeded_holiday_years` — years whose Polish public holidays have already been seeded (5.5)
+- `total_hours_paid_only` — default `true`. Whether 6.5's "total hours" and norm figures are summed
+  from paid/worked hours or from total shift time; see 6.5
 - `schema_version`
 
 ### 5.2 `periods`
@@ -188,13 +190,28 @@ are seeded on first launch, but they are ordinary rows: renameable, editable, de
 - `note` — free description, shown in the type picker
 
 **Time**
-- `default_start`, `default_end` — minutes from midnight, either may be null
-- `default_break_minutes`
-- `default_duration_minutes` — used by types without times
+- `default_start`, `default_end` — `"HH:MM"` local wall-clock strings, either may be null. Stored as
+  strings rather than minutes-from-midnight to match `entries.start_time`/`end_time` and the one parser
+  in `lib/calc/duration.ts` that reads both (recorded as a field-name deviation in 5.4.1)
+- `default_break_minutes` — meaningful only together with both times; a break has nothing to be
+  measured against without a start and an end
+- `default_break_paid_minutes` — see "Paid break" below
+- `default_hours` — used by types without both times. Fills the role this section originally gave
+  `default_duration_minutes`; see 5.4.1 for why no separate field exists
 
 Precedence: if both `default_start` and `default_end` are set, duration derives from them and
-`default_duration_minutes` is ignored. If times are absent, `default_duration_minutes` is used. If that
-is absent too, `settings.default_hours` applies.
+`default_hours` is ignored for the derivation (it remains stored and used only as this same fallback
+for other types). If times are absent, `default_hours` is used. If that is absent too — it never is,
+the field always holds a number — `settings.default_hours` would apply.
+
+**Paid break.** Not part of the original requirements; added because a break is not always unpaid in
+practice. `default_break_paid_minutes` is a single number: how many minutes of the break are paid.
+`0` reproduces the pre-existing behaviour (break entirely unpaid); a value equal to
+`default_break_minutes` pays the break in full; anything in between pays it partially. A single number
+was chosen over a `break_pay_mode: unpaid | paid | partial` enum plus a separate amount because it
+already expresses all three states by itself and cannot fall out of sync with a second field the way an
+enum-plus-number pair could. See 6.1 for the formula and `entries.paid_break_minutes` in 5.4 for the
+per-entry equivalent.
 
 **Pay**
 - `pay_mode` — `hourly` | `fixed_amount` | `unpaid`
@@ -268,8 +285,16 @@ A fact about a date. Multiple entries per date are allowed.
 **Links and time**
 - `date` — start date of the shift, stored as a `YYYY-MM-DD` local calendar string
 - `day_type_id`
-- `start_minutes`, `end_minutes`, `break_minutes` — nullable
-- `duration_minutes` — final duration
+- `start_time`, `end_time` — `"HH:MM"` local wall-clock strings, nullable (field-name deviation from
+  this section's original `start_minutes`/`end_minutes`, see 5.4.1)
+- `break_minutes` — nullable
+- `paid_break_minutes` — nullable; how many minutes of `break_minutes` are paid, see 5.3's "Paid break"
+  and 6.1. `null` and `0` mean the same thing, matching `break_minutes`' own null-safe convention
+- `hours` — final duration, in decimal **hours** (deviation from this section's `duration_minutes`,
+  recorded in 5.4.1) and always the **paid/worked** hours: what `pay_mode = hourly` multiplies by the
+  rate, and what feeds 6.5's totals when `settings.total_hours_paid_only` is on. The shift's total time
+  (including the break) is never stored — it is recomputed on demand from `hours`, `break_minutes` and
+  `paid_break_minutes` (`lib/calc/duration.ts:totalShiftMinutesOf`), never from the day type
 - `duration_is_manual` — duration typed by hand, no longer derived from times
 
 **Money, snapshot at the time of calculation**
@@ -316,15 +341,20 @@ the calculation layer and every stored row, for no gain the user can see.
   for `pinned_rate`, and `ignore_auto_multipliers` for the inverse of `allow_auto_multipliers`. The
   UI wording follows this document ("allow"); only the stored key is inverted. `rate_mode` decides
   whether `default_rate` is used — a value left in the field does not by itself pin the type.
-- **Day type default times are not implemented.** 5.3's `default_start`, `default_end`,
-  `default_break_minutes` and `default_duration_minutes` do not exist; `default_hours` covers the
-  working path. 6.1's derivation of duration from start and end **is now implemented** (invariants
-  28, 30, 31 and 32 with it), so the reason these were deferred alongside it has gone; they remain
-  outstanding on their own. Consequently 6.1's fallback branch reads
-  `day_type.default_hours` → `settings.default_hours` where the formula names
-  `day_type.default_duration_minutes`. The substitution is exact in meaning — both express "this
-  type of day lasts this long" — and adding the four fields would drag in a migration, the day type
-  editor, and 6.7's "update N entries?" offer, which is a separate change.
+
+  `day_types.default_start`/`default_end` and `entries.start_time`/`end_time` store `"HH:MM"` local
+  wall-clock strings, not "minutes from midnight" as this section names them. The single time parser
+  in `lib/calc/duration.ts` (`parseTimeToMinutes`) already read strings for entries before this work;
+  giving the day type's own times a second representation would have meant two parsers for one
+  concept. `default_hours` plays the role this section calls `default_duration_minutes` — no field of
+  that name exists, and none is planned; the substitution is exact in meaning ("this type of day lasts
+  this long") and is now a permanent naming choice, not a deferred gap.
+
+- **Day type default times are implemented**, including the paid-break concept from 5.3 that this
+  document did not originally have. `default_start`, `default_end`, `default_break_minutes` and
+  `default_break_paid_minutes` exist and drive the priority ladder in 5.3 and the formula in 6.1;
+  invariants 28, 30 (generalised to the *unpaid* portion of the break), 31 and 32 hold for it the same
+  way they hold for a day's own times.
 
 - **The shift times are shown by a disclosure in the day sheet, not by `settings.show_shift_times`.**
   The setting exists and still decides the initial state, but nothing could turn it on before block 7,
@@ -338,6 +368,21 @@ the calculation layer and every stored row, for no gain the user can see.
   would have made the next Save on any day with times rewrite a wage the user had typed by hand.
   Import applies the same default to files written by older versions (invariant 50). Turning
   derivation on for such a day is a visible, per-day act: the "считать по времени" button in 8.2.
+
+- **`paid_break_minutes` is `0` on every entry and `default_break_paid_minutes` is `0` on every day
+  type that predates the paid-break work.** The `version(9)` upgrader sets this and changes nothing
+  else. Before this work every break was unpaid by construction — `0` is not a cautious default, it is
+  a literal description of what already happened to every stored row: `worked = total − break + 0` is
+  exactly the pre-existing `duration = raw − break_minutes`. Day types also get
+  `default_start = default_end = default_break_minutes = null`, so the derivation-from-times branch
+  stays untaken for them and `default_hours` keeps driving new entries exactly as before. Import
+  applies the same `0` default to files that predate this field (invariant 50).
+
+- **`settings.total_hours_paid_only` is exposed by a single toggle on the settings stub, not by the
+  real settings screen of 8.4.** Block 7 has not built that screen yet, and a setting nobody could
+  reach would leave 6.5's two possible readings of "total hours" untestable on the device. The one
+  control lives directly on the placeholder page (`SettingsPage.tsx`) until block 7 replaces it with
+  the real screen.
 
 ### 5.5 `holidays`
 
@@ -375,15 +420,32 @@ Cloud only. Never part of an export file.
 
 ```
 if duration_is_manual:
-    duration = duration_minutes
+    worked = hours                    // typed by hand; total is shown for
+                                       // display only, computed algebraically
 else if start and end are set:
-    raw = end − start
-    if raw <= 0: raw += 24 h          // shift crosses midnight
-    duration = raw − break_minutes
+    total       = end − start
+    if total <= 0: total += 24 h      // shift crosses midnight
+    break       = break_minutes
+    paid_break  = paid_break_minutes  // how much of the break is paid, 5.3
+    worked      = total − (break − paid_break)
 else:
-    duration = day_type.default_duration_minutes
-               or settings.default_hours
+    worked = day_type.default_hours
+             or settings.default_hours
 ```
+
+`worked` is what is stored in `entries.hours`: the paid/worked duration, exactly what `pay_mode =
+hourly` multiplies by the rate (6.4) and — by default — what 6.5 sums into "total hours" and the norm.
+The shift's total time (`total` above) is never stored; it is always recomputed from `hours`,
+`break_minutes` and `paid_break_minutes` for display, and is shown next to the hours field in the day
+sheet (8.2) alongside the break itself, so the three related numbers — total time, worked hours, break
+— are all visible together.
+
+**Paid break, generalising invariant 30.** A break longer than the shift still yields zero worked hours
+and a warning, but the condition is now about the *unpaid* portion: zero and a warning happen exactly
+when `total − (break − paid_break) < 0`. At `paid_break = 0` this is the original condition unchanged.
+`paid_break` greater than `break` is not rejected (invariant 54): it lengthens the paid time beyond the
+shift's total span, the mirror image of a negative `break_minutes` already doing the same from the
+other side of the formula.
 
 Duration is wall-clock. Daylight saving transitions are ignored: a shift from 22:00 to 06:00 is always
 eight hours, including on the night the clocks change. The alternative produces an hour of unexplained
@@ -441,16 +503,27 @@ rounding pass.
 ### 6.5 Period totals
 
 ```
+duration      = entry.hours                              if settings.total_hours_paid_only (default)
+              = total shift time (6.1), incl. the break   otherwise
+
 amount        = Σ entry amounts + extra_amount
-total hours   = Σ durations where day_type.counts_as_work
-norm hours    = Σ durations where day_type.counts_toward_norm
+total hours   = Σ duration where day_type.counts_as_work
+norm hours    = Σ duration where day_type.counts_toward_norm
 remaining     = norm_hours − norm hours
 ```
 
+**"Total hours" is unambiguous: it means paid/worked hours by default.** `settings.total_hours_paid_only`
+(default `true`) is what decides it, per-entry, for both `total hours` and `norm hours` alike — there is
+no reason for the calendar footer and the remaining-to-norm figure to disagree about what an hour means.
+With the default on, this is exactly `entries.hours` summed as before the paid break existed: nothing
+changes for anyone until they turn the setting off. With it off, an entry with a paid break contributes
+more than `entries.hours` to both figures — see 6.1 for how the total is derived.
+
 For periods with `is_manual = true` no summation occurs; totals come straight from `closed_totals`.
 
-Closing a period writes totals into `closed_totals`. After that, no change to settings, rules or rates
-affects it.
+Closing a period writes totals into `closed_totals`, using whatever `settings.total_hours_paid_only`
+reads at the moment of closing. After that, no change to settings, rules or rates affects it — flipping
+the setting later does not reopen or resum a closed period's snapshot.
 
 ### 6.6 Changing a period's base rate
 
@@ -656,14 +729,23 @@ leads directly into day type creation: types are most often needed at the moment
 
 Once a type is chosen:
 
-- start and end times if the type defines them, otherwise a duration field
-- duration, always visible. Editing it by hand sets `duration_is_manual` and marks the link to the
-  times as broken, with a button to restore
+- start and end times if the type defines them, otherwise a duration field. A break and how much of it
+  is paid (6.1) sit alongside the times
+- hours, always visible and always editable by typing — there is no stepper next to it, only the field
+  itself (see the deviation below). Editing it by hand sets `duration_is_manual` and marks the link to
+  the times as broken, with a button to restore. The total shift time (including the break) is shown
+  next to it, purely for reading — it is never itself an input
+- a value that differs from what selecting this day type would give right now is marked, per
+  invariant 57
 - multiplier and rate, linked as in the type form, labelled with the source: "Sunday", "from day type",
   "manual"
 - the day's amount, large, recomputed live
 - a toggle for entering the amount by hand
 - a note
+
+**Deviation.** The hours field no longer has ±0.5 stepper buttons next to it — removed at the client's
+request. The field itself stays as freely editable as every other field in the app (requirement 4):
+only the two buttons are gone, not the ability to type a number directly.
 
 **Deviation, agreed with the client after block 6.** The entry reaches the database only when the
 **Save** button is pressed, not on every field change. Two consequences follow, both accepted

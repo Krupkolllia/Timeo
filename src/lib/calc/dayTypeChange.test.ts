@@ -48,6 +48,10 @@ describe("hasFinancialChange", () => {
       { default_multiplier: 2 },
       { default_rate: 50 },
       { default_hours: 12 },
+      { default_start: "09:00" },
+      { default_end: "17:00" },
+      { default_break_minutes: 30 },
+      { default_break_paid_minutes: 15 },
       { counts_as_work: false },
       { counts_toward_norm: false },
       { ignore_auto_multipliers: true },
@@ -112,6 +116,22 @@ describe("planDayTypeChange", () => {
     expect(patches).toHaveLength(1);
     expect(patches[0].amount).toBe(360); // 6 × 30 × 2, а не 12 × 30 × 2
     expect(patches[0]).not.toHaveProperty("hours");
+  });
+
+  it("правка времён/перерыва по умолчанию не даёт ни одного патча: они финансовые (раздел 6.7), но влияют только на новые записи", () => {
+    // hasFinancialChange для этих полей — true (см. выше), поэтому экран
+    // покажет вопрос "обновить N записей?", но само число N всегда 0: они не
+    // входят в формулу суммы существующей записи вовсе.
+    const dayType = makeDayType({
+      default_start: "09:00",
+      default_end: "17:00",
+      default_break_minutes: 30,
+      default_break_paid_minutes: 15,
+      default_multiplier: 1,
+    });
+    const entry = makeEntry({ date: "2026-08-10", hours: 6, multiplier: 1, rate_per_hour: 30, amount: 180 });
+
+    expect(plan(dayType, [entry])).toEqual([]);
   });
 
   it("не выпускает патч, когда пересчёт дал те же числа (инвариант 13)", () => {

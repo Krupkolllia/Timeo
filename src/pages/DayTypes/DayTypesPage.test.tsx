@@ -48,6 +48,10 @@ function makeType(overrides: Partial<DayType> = {}): DayType {
     counts_as_work: true,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: false,
@@ -201,6 +205,27 @@ describe("DayTypesPage — форма", () => {
       expect(rows[0].name).toBe("Ночная смена");
       expect(rows[0].label).toBe("Н");
       expect(rows[0].default_multiplier).toBe(1.5);
+    });
+  });
+
+  it("раздел 5.3: сохраняет времена смены по умолчанию и оплачиваемый перерыв", async () => {
+    await seed({ dayTypes: [] });
+
+    renderPage("/settings/day-types?new=1");
+
+    fireEvent.change(await screen.findByLabelText(ru.dayTypes.defaultStartTime), { target: { value: "09:00" } });
+    fireEvent.change(screen.getByLabelText(ru.dayTypes.defaultEndTime), { target: { value: "17:00" } });
+    fireEvent.change(screen.getByLabelText(ru.dayTypes.defaultBreakMinutes), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText(ru.dayTypes.defaultBreakPaidMinutes), { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.dayTypes.save }));
+
+    await waitFor(async () => {
+      const rows = await db.day_types.where("user_id").equals(userId).toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].default_start).toBe("09:00");
+      expect(rows[0].default_end).toBe("17:00");
+      expect(rows[0].default_break_minutes).toBe(30);
+      expect(rows[0].default_break_paid_minutes).toBe(15);
     });
   });
 
