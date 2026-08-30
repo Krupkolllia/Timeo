@@ -3,6 +3,21 @@ export const ru = {
     name: "Timeo",
     updateAvailable: "Доступно обновление — нажмите, чтобы перезапустить",
   },
+  nav: {
+    calendar: "Календарь",
+    period: "Период",
+    settings: "Настройки",
+    more: "Ещё",
+  },
+  more: {
+    title: "Ещё",
+    dataSection: "Данные",
+    pastPeriods: "Прошлые периоды",
+    exportRestore: "Экспорт и восстановление",
+    aboutSection: "О приложении",
+    version: "Версия",
+    accountPlaceholder: "Аккаунт появится в одном из следующих обновлений",
+  },
   settings: {
     version: "Версия",
     // Раздел 6.5: чем считать "общее время" и норму периода. Экрана настроек

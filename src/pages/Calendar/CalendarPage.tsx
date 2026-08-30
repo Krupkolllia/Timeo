@@ -21,6 +21,7 @@ import { buildHolidayByDate } from "@/lib/calc/holidays";
 import { roundHours, roundMoney } from "@/lib/calc/round";
 import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
+import { TabBar } from "@/components/TabBar";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
 
@@ -283,7 +284,7 @@ export function CalendarPage() {
           сам скроллер раньше начинался без отступа — ровно на границе своей
           области клиппинга, — и обводка обрезалась на паре пикселей на любом
           месяце, чья первая неделя содержит праздник. */}
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-32">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-[calc(8rem+var(--tabbar-h))]">
         {weeks.map((week) => (
           <div key={toISODate(week[0])} className="grid grid-cols-7 gap-1">
             {week.map((date) => {
@@ -348,13 +349,6 @@ export function CalendarPage() {
             })}
           </div>
         ))}
-
-        {/* Временный индикатор сборки: тестирование идёт удалённо (раздел 12 ТЗ), и без него
-            неотличимо «баг не исправлен» от «на телефоне закешировалась старая версия».
-            Переехать в экран настроек (раздел 7.4), когда тот появится в блоке 6. */}
-        <p className="mt-auto pt-4 text-center text-[10px] text-app-fg/25">
-          v{__APP_VERSION__}{__BUILD_SHA__ && ` · ${__BUILD_SHA__}`}
-        </p>
       </div>
 
       {/* Раздел 8.1: «тап разворачивает полную расшифровку». Панель целиком —
@@ -364,7 +358,7 @@ export function CalendarPage() {
         type="button"
         onClick={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
         aria-label={ru.period.openSummary}
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-app-fg/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 text-left backdrop-blur active:bg-app-fg/5"
+        className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-app-fg/10 bg-app-bg/95 px-4 pb-3 pt-3 text-left backdrop-blur active:bg-app-fg/5"
       >
         {/* Раздел 7.1: «строкой выше мелко: сравнение с прошлым периодом
             (например «+340 zł») и остаток до нормы часов». Знак берётся из
@@ -461,6 +455,8 @@ export function CalendarPage() {
           </button>
         </div>
       )}
+
+      <TabBar />
     </div>
   );
 }

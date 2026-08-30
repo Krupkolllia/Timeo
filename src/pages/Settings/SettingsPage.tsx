@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { TabBar } from "@/components/TabBar";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import { updateSettings } from "@/db/settings";
@@ -10,7 +11,7 @@ export function SettingsPage() {
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
 
   return (
-    <div className="min-h-dvh bg-app-bg p-4 text-app-fg">
+    <div className="min-h-dvh bg-app-bg p-4 text-app-fg" style={{ paddingBottom: "calc(var(--tabbar-h) + 1rem)" }}>
       {/*
        * Раздел 6.5 ТЗ. Экрана настроек (блок 7) ещё нет — эта единственная
        * настройка временно живёт на заглушке, как раньше settings.show_shift_times
@@ -48,6 +49,7 @@ export function SettingsPage() {
       <p className="text-xs text-app-fg/40">
         {ru.settings.version} {__APP_VERSION__}
       </p>
+      <TabBar />
     </div>
   );
 }

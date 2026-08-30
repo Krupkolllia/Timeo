@@ -132,12 +132,6 @@ describe("CalendarPage — сетка", () => {
     await waitFor(() => expect(dayCell("2026-08-10").querySelectorAll("span[style]")).toHaveLength(3));
   });
 
-  it("показывает версию сборки", async () => {
-    renderCalendar();
-    await ready();
-    expect(screen.getByText(/^v\d+\.\d+\.\d+/)).toBeInTheDocument();
-  });
-
   it("даёт скроллеру верхний отступ, равный зазору между строк недель", async () => {
     // Часть бага 1, проверяемая без вёрстки: у скроллера должен быть тот же
     // отступ сверху, что и gap-1 между строками, иначе праздничная ячейка в

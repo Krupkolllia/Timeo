@@ -26,6 +26,38 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: ru.app.updateAvailable })).toBeInTheDocument();
   });
 
+  // Клик по <a> реального BrowserRouter в jsdom падает на AbortSignal внутри
+  // undici (несовместимость jsdom и Node на этой версии, независимая от
+  // нашего кода) — тот же класс проблем, из-за которого страницы в остальных
+  // тестах рендерятся в MemoryRouter напрямую, а не через вложенный маршрут.
+  // Поэтому переход проверяется тем же приёмом, что и в тесте «неизвестный
+  // адрес» ниже: адрес задаётся до монтирования свежего App, а то, что сама
+  // ссылка ведёт на этот адрес, проверяет TabBar.test.tsx.
+  it("вкладка «Настройки» открывает экран настроек", async () => {
+    window.history.pushState({}, "", "/settings");
+    vi.resetModules();
+    const { App: FreshApp } = await import("@/app/App");
+    render(<FreshApp />);
+    expect(await screen.findByText(`${ru.settings.version} ${__APP_VERSION__}`)).toBeInTheDocument();
+  });
+
+  it("вкладка «Период» открывает итоги текущего периода без кнопки назад", async () => {
+    window.history.pushState({}, "", "/period");
+    vi.resetModules();
+    const { App: FreshApp } = await import("@/app/App");
+    render(<FreshApp />);
+    await screen.findByText(ru.period.baseRate);
+    expect(screen.queryByRole("button", { name: ru.period.back })).not.toBeInTheDocument();
+  });
+
+  it("вкладка «Ещё» открывает экран данных и версии", async () => {
+    window.history.pushState({}, "", "/more");
+    vi.resetModules();
+    const { App: FreshApp } = await import("@/app/App");
+    render(<FreshApp />);
+    expect(await screen.findByText(ru.more.pastPeriods)).toBeInTheDocument();
+  });
+
   it("неизвестный адрес показывает панель ошибки, а не пустой экран (инвариант 58)", async () => {
     // Роутер создаётся на импорте модуля и запоминает текущий адрес, поэтому
     // адрес задаётся до импорта, а модули сбрасываются.

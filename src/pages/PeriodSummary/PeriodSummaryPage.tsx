@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
+import { TabBar } from "@/components/TabBar";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import {
@@ -197,6 +198,10 @@ export function PeriodSummaryPage() {
   const isClosed = period.is_closed;
   const rateValue = rateDraft ?? period.base_rate;
   const rateChanged = rateValue !== period.base_rate;
+  // Часть 2.3: без параметров экран открыт вкладкой «Период», а не тапом по
+  // панели итогов календаря — в этом случае возвращаться некуда, «назад»
+  // прячется, и панель вкладок встаёт на её обычное место снизу.
+  const isTab = searchParams.get("year") === null && searchParams.get("month") === null;
 
   return (
     // h-dvh, а не min-h-dvh: без ограниченной высоты у flex-родителя
@@ -205,13 +210,15 @@ export function PeriodSummaryPage() {
     // можно только пролистав весь список обратно.
     <div className="flex h-dvh flex-col bg-app-bg text-app-fg">
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
-        <button
-          className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
-          onClick={goBack}
-          aria-label={ru.period.back}
-        >
-          ‹
-        </button>
+        {!isTab && (
+          <button
+            className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
+            onClick={goBack}
+            aria-label={ru.period.back}
+          >
+            ‹
+          </button>
+        )}
         <span className="text-lg font-semibold tracking-tight">
           {ru.calendar.monthNames[label.month - 1]} {label.year}
         </span>
@@ -219,7 +226,11 @@ export function PeriodSummaryPage() {
 
       {/* min-h-0 обязателен: без него flex-элемент не сжимается ниже своего
           контента и overflow-y-auto остаётся бездействующим. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
+      <div
+        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 ${
+          isTab ? "pb-[calc(var(--tabbar-h)+1rem)]" : "pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
+        }`}
+      >
         {isClosed && (
           <p className="rounded-xl bg-app-fg/5 px-3 py-2 text-sm text-app-fg/60">{ru.period.closedBanner}</p>
         )}
@@ -457,6 +468,8 @@ export function PeriodSummaryPage() {
           </div>
         </div>
       )}
+
+      {isTab && <TabBar />}
     </div>
   );
 }
