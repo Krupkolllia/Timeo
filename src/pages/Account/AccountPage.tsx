@@ -271,6 +271,11 @@ export function AccountPage() {
                     disabled={busy}
                     onClick={() =>
                       void withBusy(async () => {
+                        // Отказ провайдера мог случиться, пока сессия была жива,
+                        // и на экране он тогда не виден. Не убрать его здесь —
+                        // значит встретить человека после выхода сообщением о
+                        // входе, которого он только что не делал.
+                        useSyncStore.getState().set({ signInError: null });
                         await signOut();
                         await handleAccountChange(db, cloudGateway, null, __APP_VERSION__);
                       })

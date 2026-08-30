@@ -302,6 +302,22 @@ describe("AccountPage — вход через Google", () => {
   });
 });
 
+describe("AccountPage — выход после неудачного входа через Google", () => {
+  it("старое сообщение о Google не встречает человека после выхода", async () => {
+    await db.settings.put(makeSettings({ id: "s-1", user_id: ACCOUNT.userId }));
+    localStorage.setItem("timeo:cloud-user-id", ACCOUNT.userId);
+    // Отказ провайдера мог случиться в другой вкладке, пока здесь была сессия:
+    // на экране он тогда не виден, но в состоянии лежит.
+    useSyncStore.setState({ phase: "idle", account: ACCOUNT, signInError: "oauth_cancelled" });
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signOut }));
+
+    await screen.findByRole("button", { name: ru.account.signIn });
+    expect(screen.queryByText(ru.account.errorOauthCancelled)).not.toBeInTheDocument();
+  });
+});
+
 describe("AccountPage — сборка без облака", () => {
   it("инвариант 39: экран объясняет, что облака нет, и не предлагает войти", () => {
     useSyncStore.setState({ phase: "disabled", account: null });
