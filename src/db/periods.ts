@@ -283,6 +283,7 @@ export async function closePeriod(
   year: number,
   month: number,
   periodStartDay: number,
+  totalHoursPaidOnly = true,
 ): Promise<void> {
   const { start, end } = getPeriodDateRange(year, month, periodStartDay);
   const startISO = toISODate(start);
@@ -294,7 +295,9 @@ export async function closePeriod(
 
     const entries = await listPeriodEntries(db, userId, startISO, endISO);
     const dayTypes = await db.day_types.where("user_id").equals(userId).toArray();
-    const totals = calculatePeriodTotals(period, entries, new Map(dayTypes.map((dt) => [dt.id, dt])));
+    const totals = calculatePeriodTotals(period, entries, new Map(dayTypes.map((dt) => [dt.id, dt])), {
+      total_hours_paid_only: totalHoursPaidOnly,
+    });
 
     await db.periods.update(period.id, {
       is_closed: true,

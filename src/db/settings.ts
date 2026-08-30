@@ -21,6 +21,16 @@ export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
   total_hours_paid_only: true,
 };
 
+/**
+ * Правка одного поля настроек с экрана-заглушки настроек (блок 7 ещё не
+ * построен, но и там правка настроек не должна открывать ничего, кроме
+ * settings — этому полю тоже нечего пересчитывать: раздел 6.5 читает его при
+ * следующем построении итогов, а не пересчитывает существующие).
+ */
+export async function updateSettings(db: TimeoDB, id: string, patch: Partial<Settings>): Promise<void> {
+  await db.settings.update(id, { ...patch, updated_at: new Date().toISOString() });
+}
+
 export async function ensureSettings(db: TimeoDB, userId: string): Promise<Settings> {
   // The rw transaction makes check-then-insert atomic: without it, two parallel
   // calls (e.g. a double effect invocation in React StrictMode) would both fail to find

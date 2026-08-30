@@ -223,17 +223,17 @@ export function CalendarPage() {
   }, [entries]);
 
   const totals = useMemo(() => {
-    if (!period) return null;
-    return calculatePeriodTotals(period, entries ?? [], dayTypeById);
-  }, [period, entries, dayTypeById]);
+    if (!period || !settings) return null;
+    return calculatePeriodTotals(period, entries ?? [], dayTypeById, settings);
+  }, [period, entries, dayTypeById, settings]);
 
   // Сравнение показываем только если предыдущий период реально существует:
   // «+0» на первом же месяце использования дезинформирует.
   const delta = useMemo(() => {
-    if (!previousPeriod || !totals) return null;
-    const previousTotals = calculatePeriodTotals(previousPeriod, previousEntries ?? [], dayTypeById);
+    if (!previousPeriod || !totals || !settings) return null;
+    const previousTotals = calculatePeriodTotals(previousPeriod, previousEntries ?? [], dayTypeById, settings);
     return roundMoney(totals.amount - previousTotals.amount);
-  }, [previousPeriod, previousEntries, dayTypeById, totals]);
+  }, [previousPeriod, previousEntries, dayTypeById, totals, settings]);
 
   if (!settings || !viewed || !range) {
     return (

@@ -118,8 +118,8 @@ export function PeriodSummaryPage() {
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
 
   const totals = useMemo(
-    () => (period ? calculatePeriodTotals(period, entries ?? [], dayTypeById) : null),
-    [period, entries, dayTypeById],
+    () => (period && settings ? calculatePeriodTotals(period, entries ?? [], dayTypeById, settings) : null),
+    [period, entries, dayTypeById, settings],
   );
 
   // Черновик базовой ставки: единственное поле, которое не пишется сразу —
@@ -368,7 +368,16 @@ export function PeriodSummaryPage() {
         ) : (
           <button
             className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
-            onClick={() => void closePeriod(db, userId, viewed.year, viewed.month, settings.period_start_day)}
+            onClick={() =>
+              void closePeriod(
+                db,
+                userId,
+                viewed.year,
+                viewed.month,
+                settings.period_start_day,
+                settings.total_hours_paid_only,
+              )
+            }
           >
             {ru.period.closePeriod}
           </button>
