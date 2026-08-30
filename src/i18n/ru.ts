@@ -74,6 +74,8 @@ export const ru = {
     differentUserExportFirst: "Сначала сохранить файл",
     differentUserStep1: "Понимаю: данные этого телефона будут стёрты",
     differentUserConfirm: "Стереть и войти",
+    differentUserCancel: "Не входить этим аккаунтом",
+    differentUserCancelHint: "Вход отменяется, с телефона ничего не удаляется",
     countPeriods: "периодов",
     countEntries: "записей",
     countDayTypes: "типов дня",

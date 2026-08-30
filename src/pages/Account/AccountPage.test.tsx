@@ -12,6 +12,8 @@ import type { AuthResult, OAuthStart } from "@/lib/sync/auth";
 
 const LOCAL_ID = "local-anon-uuid";
 const ACCOUNT = { userId: "11111111-2222-3333-4444-555555555555", email: "test@example.com" };
+/** Аккаунт, которому принадлежат данные телефона до попытки войти другим. */
+const OTHER_ID = "99999999-8888-7777-6666-555555555555";
 
 const cloud = new FakeCloud();
 const signInMock = vi.fn<(email: string, password: string) => Promise<AuthResult>>();
@@ -226,6 +228,33 @@ describe("AccountPage — вход другим пользователем", () 
 
     fireEvent.click(screen.getByLabelText(ru.account.differentUserStep1));
     expect(screen.getByRole("button", { name: ru.account.differentUserConfirm })).toBeEnabled();
+  });
+
+  it("инвариант 54: из предупреждения есть выход, не равный стиранию", async () => {
+    await db.settings.put(makeSettings({ id: "s-1", user_id: LOCAL_ID }));
+    await db.periods.put(makePeriod({ id: "p-open", user_id: LOCAL_ID, base_rate: 31.6 }));
+    await db.entries.put(makeEntry({ id: "e-open", user_id: LOCAL_ID, amount: 318.47 }));
+    localStorage.setItem("timeo:cloud-user-id", OTHER_ID);
+    useSyncStore.setState({
+      phase: "different_user",
+      account: ACCOUNT,
+      differentUser: {
+        account: ACCOUNT,
+        local: { periods: 1, day_types: 1, entries: 1, holidays: 0, months_with_money: 1 },
+      },
+    });
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.differentUserCancel }));
+
+    // Сначала ждём экран, и только потом читаем базу.
+    await screen.findByRole("button", { name: ru.account.signIn });
+    expect(screen.queryByRole("button", { name: ru.account.differentUserConfirm })).not.toBeInTheDocument();
+    expect(signOutMock).toHaveBeenCalled();
+    // Инвариант 44: отмена не трогает ни одной строки и ни одного аккаунта.
+    expect((await db.entries.get("e-open"))?.amount).toBe(318.47);
+    expect((await db.periods.get("p-open"))?.user_id).toBe(LOCAL_ID);
+    expect(localStorage.getItem("timeo:cloud-user-id")).toBe(OTHER_ID);
   });
 
   it("предлагает сначала сохранить файл — и уводит на экран экспорта", () => {
