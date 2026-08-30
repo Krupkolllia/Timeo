@@ -76,9 +76,22 @@ store; no Redux.
 **Local storage.** IndexedDB via Dexie. This is the primary store. Everything the user sees is read
 from here. No loading spinners on open.
 
-**Cloud.** Supabase Postgres. Schema mirrors the local one. Sync is background and non-blocking. Row
-Level Security on every table, policies keyed on `auth.uid() = user_id`. Conflict resolution is
-last-write-wins on `updated_at`.
+**Cloud.** Supabase Postgres, built in block 8. The schema mirrors the local one
+(`supabase/sql/001_schema.sql`, run by hand in the SQL Editor): same tables, same field names, plus
+one column the client cannot write — `server_updated_at`, stamped by a trigger. Row Level Security is
+on every table with policies keyed on `auth.uid() = user_id`; there is no `DELETE` policy, because
+deletion is soft everywhere. The `anon` role holds no privilege at all.
+
+Sync is background and non-blocking: no screen ever waits for it. One cycle pulls first, then pushes.
+The pull is incremental on `server_updated_at` — the server's receipt order, so a device with a wrong
+clock cannot hide a row from it. The conflict itself is decided on the client, per row, by
+last-write-wins on `updated_at`; a timestamp more than a day ahead of the server is repaired to server
+time on the way up, so a fast clock cannot win every conflict until that future arrives. Push
+watermarks advance only on the server's acknowledgement, so a failed sync retries and loses nothing.
+
+Sign-in is email and password. Google sign-in is deferred to its own piece of work: the OAuth round
+trip leaves a standalone home-screen PWA on iOS and comes back in Safari, which needs a device check
+of its own and must not be mixed with the first release of sync.
 
 **Hosting.** Cloudflare Workers with Static Assets, deployed from a private GitHub repository via
 Workers Builds. Not Cloudflare Pages: the same Worker later hosts the push sender and the keep-alive
@@ -125,9 +138,15 @@ Every table carries `id` (uuid v4, generated client-side), `user_id`, `created_a
 
 **Operation without an account.** The app is fully functional before any sign-in; this is a
 requirement, not a temporary simplification. Until sign-in, `user_id` holds a local uuid generated on
-first launch. On first sign-in every local row is rewritten to the real `user_id` and pushed. If the
-cloud already holds data for that account, the user is asked which side to keep. Silent merging is
-forbidden.
+first launch. On first sign-in every local row is rewritten to the real `user_id` and pushed — one
+atomic transaction over the five tables, and `updated_at` is deliberately not touched (5.4.1). If the
+cloud already holds data for that account, the user is asked which side to keep, in the same two modes
+and the same words the restore screen uses (8.8). Silent merging is forbidden. Nothing is written
+until the answer is given, so closing the app mid-question changes nothing and asks again.
+
+The active `user_id` has exactly one source (`src/store/userStore.ts`): the account id once a first
+sign-in has completed on this device, the anonymous uuid until then. Signing out changes neither —
+the data stays under the account id and sync simply stops.
 
 ### 5.1 `settings`
 
@@ -397,6 +416,56 @@ the calculation layer and every stored row, for no gain the user can see.
   effective from" field — which is a rewrite of `lib/calc/period.ts` and every caller, roughly the size
   of the rest of block 7. Deferred to its own block; the settings screen explains the lock and links to
   the list of periods instead of hiding the reason.
+
+- **Block 8, the cloud: what was decided and why.**
+
+  - **`server_updated_at` exists in Postgres and nowhere locally.** Invariant 42 asks for the server's
+    receipt order where clocks disagree, and one client-written `updated_at` cannot provide it. The
+    column is written by a trigger, the client never sends it, and the incremental pull filters on it.
+    Conflicts are still decided by `updated_at` (invariant 41); the server column is the pull cursor
+    and the tie-break, never the resolver.
+
+  - **A `updated_at` more than 24 hours ahead of the server is repaired to server time when the row is
+    pushed**, locally as well as in the cloud. Nothing but the timestamp changes: no amount, no
+    `closed_totals`, no closed period. Without the repair a phone whose clock is a year fast wins every
+    conflict for a year — the literal failure invariant 42 names.
+
+  - **The settings row's id in the cloud is the account's `user_id`.** One row per user is a unique
+    constraint in Postgres, and two devices would each have created that row with their own random
+    uuid, so the second device's push would fail forever. The id is normalised at the start of every
+    sync; no field, including `updated_at`, is touched by the normalisation.
+
+  - **No foreign key from `entries.day_type_id` to `day_types.id`.** Invariant 37 is enforced on the
+    client — types are applied and pushed before entries, and an entry whose type has not arrived yet
+    is held back rather than written. A database-level key would reject the whole push instead, and
+    invariant 43 forbids losing local data over it.
+
+  - **Soft-deleted rows are still never purged.** Invariant 38 keeps them "until sync has propagated
+    the deletion", and with no device registry there is nothing that can prove propagation. They stay,
+    locally and in the cloud, in exchange for a deletion that can never come back. This is why
+    `seeded_holiday_years` (5.5) remains the record of what has been seeded.
+
+  - **`push_subscriptions` is created by the block 8 schema although nothing reads it until block 9.**
+    It is cloud-only and never part of an export (5.6, invariant 46). Creating it now costs one table
+    and saves a schema migration later.
+
+  - **`sync_meta` is a local Dexie table (`version(10)`), not user data.** Pull cursors, push
+    watermarks and the last error live there. It is never exported and never uploaded.
+
+  - **First sign-in on a device with nothing but the first-launch seed does not ask.** The question
+    exists to stop a silent merge of two sets of *work*; day types, settings and holidays are seeded
+    by the app itself on every device. "Meaningful" therefore means periods or entries. With none of
+    them locally and data in the cloud, the cloud copy simply becomes this device.
+
+  - **There is no password reset.** The Supabase project has e-mail confirmation off
+    (`mailer_autoconfirm`), so no mail is sent at all, and a reset link would need an external SMTP
+    provider. Sign-in is e-mail and password only; recovery is the customer's job in the Supabase
+    console until an SMTP provider exists.
+
+  - **Foreground sync runs on a 60-second timer, on return to the app, and on regaining the network.**
+    Local writes do not announce themselves — screens write to Dexie and know nothing about the cloud,
+    which is the point — so a cheap timer is the price of that independence. There is no realtime
+    subscription.
 
 ### 5.5 `holidays`
 
@@ -679,6 +748,27 @@ Rules that must hold under every possible sequence of actions. Each one deserves
     explicit warning.
 45. Closed periods sync like any other row; closing is not a client-only concept.
 
+**What block 8 actually guarantees, and where it stops.** 39 and 40 hold by construction: no screen
+awaits the network, and with no environment variables the app behaves exactly as it did before block 8.
+41 holds per row, decided by a pure function with no Dexie and no network in it. 42 holds through the
+server-written `server_updated_at` (pull order) plus the repair of far-future timestamps on push. 43
+holds for the push: watermarks advance only on the server's acknowledgement, and nothing is ever
+hard-deleted locally, so a failed sync retries and cannot lose a row. 44 holds: signing out touches no
+row, signing in as a different account erases only behind a warning that names the counts and a
+separate confirmation.
+
+45 holds, and its meeting point with invariant 2 is decided explicitly: a closed period arriving from
+the cloud is applied like any other row. Invariant 2 governs what the *app* lets a person do to a
+closed period — no adding, editing or deleting entries inside it — not whether the same person's own
+row may replicate from their other device. `closed_totals` travels with the row, so the frozen numbers
+are what arrives; nothing is recomputed on receipt.
+
+Two limits are worth naming rather than implying. The conflict is resolved on the client and the push
+is then a plain upsert, so an edit made on another device *between* this device's pull and its push is
+overwritten by the winner this device computed; the window is one sync cycle, and the loser's own next
+cycle brings the newer row back only if its `updated_at` is later. And a soft-deleted row is never
+purged anywhere (38, 5.4.1) — the database only grows.
+
 ### 7.8 Export and import
 
 46. Export produces a single JSON file containing `schema_version`, settings, periods, day types,
@@ -827,9 +917,17 @@ The fourth tab, added in block 7: data and app info, as opposed to Settings' rul
 export/restore live here — and here only, after an early duplicate entry point on the period summary
 screen was removed for having two places to find the same thing — plus an About section with the build
 version and hash shown large and selectable, since remote testing
-(12) identifies a build from a screenshot of exactly this line. A labelled space is reserved for the
-account that block 8 will add; it stays empty rather than showing a disabled placeholder button, since
-there is nothing yet for such a button to do.
+(12) identifies a build from a screenshot of exactly this line. The space reserved here in block 7 is now the account: one line of state in
+plain words (the signed-in address, "not signed in", or "this build has no cloud") and an entry to the
+account screen.
+
+**Account screen (8.4.2).** Signed out: e-mail and password, sign in and create account, and the error
+next to the fields — never a modal (invariants 54 and 58). Signed in: the address, when the last sync
+happened or what went wrong, sync now, and sign out with a line saying plainly that nothing is deleted
+from the phone. Two more states live on the same screen: the first-sign-in question (both sides shown
+as counts, two modes, nothing preselected) and the different-account warning, which lists what would be
+erased as numbers, offers to save a file first, and needs a read-and-confirm checkbox before the erase
+button becomes usable. Primary actions sit in the lower half throughout (invariant 59).
 
 ### 8.5 Day types
 
@@ -916,7 +1014,8 @@ error boundary panel, deployment through Workers Builds.
 
 **Block 7 — settings.** Everything in 8.4.
 
-**Block 8 — cloud.** Supabase schema, RLS, email and Google sign-in, sync, local data migration.
+**Block 8 — cloud.** Supabase schema, RLS, e-mail sign-in, two-way sync, local data migration, the
+account screen. Google sign-in is carved out into its own piece of work (section 4).
 
 **Block 9 — notifications and keep-alive.** Push subscription, the sender Worker, the cron ping.
 
