@@ -446,7 +446,7 @@ describe("PeriodSummaryPage — закрытие и переоткрытие (и
   });
 });
 
-describe("PeriodSummaryPage — ручной период и вход в экраны данных (блок 6)", () => {
+describe("PeriodSummaryPage — ручной период (блок 6)", () => {
   it("ручной период показывает вписанные итоги, а не сумму записей (инвариант 5)", async () => {
     await db.settings.add(makeSettings());
     await db.day_types.bulkAdd([hourly, unpaid]);
@@ -484,28 +484,6 @@ describe("PeriodSummaryPage — ручной период и вход в экр�
     await ready();
 
     expect(screen.getByText(ru.period.hintZeroBaseRate).className).toContain("invisible");
-  });
-
-  it("ведёт в прошлые периоды и в экспорт, возвращая на этот же период", async () => {
-    await seed();
-    renderPage("?year=2026&month=8");
-    await ready();
-
-    fireEvent.click(screen.getByRole("button", { name: ru.period.pastPeriods }));
-    expect(screen.getByTestId("location").textContent).toBe(
-      `/settings/past-periods?return=${encodeURIComponent("/period?year=2026&month=8")}`,
-    );
-  });
-
-  it("вход в экспорт несёт тот же return=", async () => {
-    await seed();
-    renderPage("?year=2026&month=8");
-    await ready();
-
-    fireEvent.click(screen.getByRole("button", { name: ru.period.exportRestore }));
-    expect(screen.getByTestId("location").textContent).toBe(
-      `/settings/export?return=${encodeURIComponent("/period?year=2026&month=8")}`,
-    );
   });
 
   it("мягко удалённый период не показывается как существующий (инвариант 38)", async () => {

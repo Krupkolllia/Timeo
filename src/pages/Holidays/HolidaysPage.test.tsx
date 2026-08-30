@@ -240,11 +240,26 @@ describe("HolidaysPage — множители (раздел 8.4 на этом э
 });
 
 describe("HolidaysPage — возврат после ?add=", () => {
-  it("«назад» из формы оставляет в списке, и следующее сохранение уже не уносит в день", async () => {
+  it("«назад» из формы, открытой сразу через ?add=, уводит по return=, а не в список", async () => {
     await seed();
     renderPage("/settings/holidays?add=2026-08-10&return=%2F%3Fday%3D2026-08-10");
 
-    fireEvent.click(await screen.findByRole("button", { name: ru.holidays.back }));
+    // Список в этом заходе не открывали ни разу — экран целиком пришёл из
+    // шторки дня, и «назад» обязана вести туда же, а не в список, которого
+    // пользователь не видел.
+    await screen.findByLabelText(ru.holidays.date);
+    fireEvent.click(screen.getByRole("button", { name: ru.holidays.back }));
+    expect(currentLocation()).toBe("/?day=2026-08-10");
+  });
+
+  it("«назад» из формы, открытой кнопкой «+» внутри списка, отменяет форму и остаётся в списке", async () => {
+    await seed();
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: ru.holidays.add }));
+    fireEvent.change(screen.getByLabelText(ru.holidays.name), { target: { value: "День фирмы" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.holidays.back }));
+
     expect(await screen.findByRole("heading", { name: ru.holidays.multipliersTitle })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: ru.holidays.add }));
@@ -252,10 +267,6 @@ describe("HolidaysPage — возврат после ?add=", () => {
     fireEvent.click(screen.getByRole("button", { name: ru.holidays.save }));
 
     await waitFor(async () => expect(await db.holidays.count()).toBe(1));
-    // Пользователь вернулся в список сам — значит, остаётся в нём.
-    expect(currentLocation()).toBe("/settings/holidays?add=2026-08-10&return=%2F%3Fday%3D2026-08-10");
-    // findBy, а не getBy: строка в базе уже есть, но перерисовка списка идёт
-    // отдельным тактом — под нагрузкой getBy успевал раньше него.
     expect(await screen.findByText("День фирмы")).toBeInTheDocument();
   });
 });

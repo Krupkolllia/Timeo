@@ -30,7 +30,12 @@ export function HolidaysPage() {
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
   const holidays = useLiveQuery(() => listHolidays(db, userId), []);
 
-  const [formOpen, setFormOpen] = useState(addDate !== null);
+  // Экран мог открыться прямо в форме (плюс из шторки дня, с ?add=) — тогда
+  // списка в этом заходе никто не видел, и «назад» должно вести туда, откуда
+  // пришли, а не в список, которого не было. «+» внутри списка — наоборот,
+  // список уже открыт, и отмена формы должна вернуть в него.
+  const enteredInFormMode = addDate !== null;
+  const [formOpen, setFormOpen] = useState(enteredInFormMode);
   // Ради какого дня сюда пришли. Отдельно от addDate, потому что намерение
   // одноразовое: «назад» из формы означает «остаюсь в списке», и следующее
   // сохранение не должно снова уносить пользователя в тот день.
@@ -149,12 +154,12 @@ export function HolidaysPage() {
         <button
           className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
           onClick={() => {
-            if (!formOpen) {
-              navigate(returnTo);
+            if (formOpen && !enteredInFormMode) {
+              setFormOpen(false);
+              setReturnAfterSave(false);
               return;
             }
-            setFormOpen(false);
-            setReturnAfterSave(false);
+            navigate(returnTo);
           }}
           aria-label={ru.holidays.back}
         >

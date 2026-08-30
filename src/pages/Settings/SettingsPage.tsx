@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
+import { useScrollMemory } from "@/app/useScrollMemory";
 import { TabBar } from "@/components/TabBar";
 import { NumberInput } from "@/components/NumberInput";
 import { db } from "@/db/db";
@@ -81,6 +82,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
   const periodLocked = useLiveQuery(() => hasClosedPeriods(db, userId), []) ?? false;
+  useScrollMemory("/settings", settings !== undefined);
   const [raceBlockedNotice, setRaceBlockedNotice] = useState(false);
   useEffect(() => {
     if (!raceBlockedNotice) return;

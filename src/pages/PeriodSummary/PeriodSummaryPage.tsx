@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
 import { TabBar } from "@/components/TabBar";
 import { db } from "@/db/db";
@@ -38,7 +38,6 @@ function parsePeriodParam(value: string | null, min: number, max: number): numbe
 }
 
 export function PeriodSummaryPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Правило «назад» одно на все внутренние экраны, см. useBackTo.
   const goBack = useBackTo("/");
@@ -188,9 +187,6 @@ export function PeriodSummaryPage() {
   }
 
   const label = getPeriodLabel(viewed.year, viewed.month, settings.period_start_day, settings.period_naming);
-  // Куда вернуть пользователя с экранов данных: именно на этот период, а не на
-  // «текущий» — с открытого июля возврат в август был бы подменой месяца.
-  const summaryPath = `/period?year=${viewed.year}&month=${viewed.month}`;
   const nextLabelId = next
     ? getPeriodLabel(next.year, next.month, settings.period_start_day, settings.period_naming)
     : label;
@@ -394,28 +390,6 @@ export function PeriodSummaryPage() {
           </button>
         )}
 
-        {/* Единственный вход в прошлые периоды (раздел 8.7) и в экспорт с
-            восстановлением (раздел 8.8) до блока 7: /settings пока пуст, а
-            восстановление нужно ровно на устройстве, где данных нет вовсе, —
-            туда ведёт панель итогов календаря, одно нажатие с главного экрана.
-            return= возвращает на этот же период, как в типах дня и праздниках. */}
-        <div>
-          <p className="text-xs text-app-fg/50">{ru.period.dataSection}</p>
-          <div className="mt-2 flex flex-col gap-2">
-            <button
-              className="min-h-11 rounded-lg bg-app-fg/5 px-3 py-3 text-left text-sm active:bg-app-fg/10"
-              onClick={() => navigate(`/settings/past-periods?return=${encodeURIComponent(summaryPath)}`)}
-            >
-              {ru.period.pastPeriods}
-            </button>
-            <button
-              className="min-h-11 rounded-lg bg-app-fg/5 px-3 py-3 text-left text-sm active:bg-app-fg/10"
-              onClick={() => navigate(`/settings/export?return=${encodeURIComponent(summaryPath)}`)}
-            >
-              {ru.period.exportRestore}
-            </button>
-          </div>
-        </div>
       </div>
 
       {rateDialogOpen && (
