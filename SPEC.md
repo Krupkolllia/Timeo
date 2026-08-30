@@ -803,8 +803,7 @@ told apart by the query parameters, not by a flag: their absence means "opened a
 Only what is not period-specific: base rate and norm **for new periods**, period start day and naming,
 default hours and the total-hours basis, show-shift-times default, currency, theme, reminders, and
 links to day types and to holidays (weekend/holiday multipliers). Export/restore and past periods live
-on the **More** tab (and, unchanged, on the period summary screen) — Settings holds rules, More holds
-data and app info.
+on the **More** tab only — Settings holds rules, More holds data and app info.
 
 A specific period's base rate is edited on its own summary screen. Editing it in settings would leave
 ambiguous which month is meant and would visually contradict period isolation even where the code
@@ -825,8 +824,9 @@ warning is simply always visible next to the field while it is editable.
 ### 8.4.1 More
 
 The fourth tab, added in block 7: data and app info, as opposed to Settings' rules. Past periods and
-export/restore (duplicated from the period summary screen — both entry points stay live, by design),
-and an About section with the build version and hash shown large and selectable, since remote testing
+export/restore live here — and here only, after an early duplicate entry point on the period summary
+screen was removed for having two places to find the same thing — plus an About section with the build
+version and hash shown large and selectable, since remote testing
 (12) identifies a build from a screenshot of exactly this line. A labelled space is reserved for the
 account that block 8 will add; it stays empty rather than showing a disabled placeholder button, since
 there is nothing yet for such a button to do.
