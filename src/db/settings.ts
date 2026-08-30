@@ -1,5 +1,8 @@
 import type { TimeoDB } from "@/db/schema";
+import { hasClosedPeriods } from "@/db/periods";
 import type { BaseRecord, Settings } from "@/types/models";
+
+export type SetPeriodStartDayResult = { status: "ok" } | { status: "blocked_closed_period" };
 
 // Section 5.1 of the spec.
 export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
@@ -79,5 +82,28 @@ export async function updateWeekendMultipliers(
       weekend_multipliers: { ...settings.weekend_multipliers, ...patch },
       updated_at: new Date().toISOString(),
     });
+  });
+}
+
+/**
+ * Инвариант 4: период_start_day нельзя менять, пока в базе есть хоть один
+ * закрытый период — сдвиг границы переставил бы дни из закрытого месяца в
+ * соседний открытый, и те же часы посчитались бы дважды (см. блок 7,
+ * обоснование в SPEC.md). Проверка и запись — одна rw-транзакция по
+ * settings и periods: без неё период мог бы закрыться между проверкой на
+ * экране и самой записью.
+ */
+export async function setPeriodStartDay(
+  db: TimeoDB,
+  userId: string,
+  settingsId: string,
+  day: number,
+): Promise<SetPeriodStartDayResult> {
+  return db.transaction("rw", db.settings, db.periods, async () => {
+    if (await hasClosedPeriods(db, userId)) {
+      return { status: "blocked_closed_period" };
+    }
+    await db.settings.update(settingsId, { period_start_day: day, updated_at: new Date().toISOString() });
+    return { status: "ok" };
   });
 }

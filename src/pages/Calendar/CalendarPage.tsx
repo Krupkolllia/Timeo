@@ -21,6 +21,7 @@ import { buildHolidayByDate } from "@/lib/calc/holidays";
 import { roundHours, roundMoney } from "@/lib/calc/round";
 import { formatDayTitle } from "@/lib/format/date";
 import { ru } from "@/i18n/ru";
+import { TabBar } from "@/components/TabBar";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
 
@@ -237,7 +238,7 @@ export function CalendarPage() {
 
   if (!settings || !viewed || !range) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-white/50">
+      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-app-fg/50">
         {ru.calendar.loading}
       </div>
     );
@@ -247,10 +248,10 @@ export function CalendarPage() {
   const weeks = buildWeeks(range.start, range.end);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-app-bg text-white">
+    <div className="flex min-h-dvh flex-col bg-app-bg text-app-fg">
       <header className="flex items-center justify-between px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
         <button
-          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
+          className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
           onClick={() => setViewed(getAdjacentPeriod(viewed.year, viewed.month, -1))}
           aria-label={ru.calendar.prevPeriod}
         >
@@ -262,7 +263,7 @@ export function CalendarPage() {
           {ru.calendar.monthNames[label.month - 1]} {label.year}
         </button>
         <button
-          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
+          className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
           onClick={() => setViewed(getAdjacentPeriod(viewed.year, viewed.month, 1))}
           aria-label={ru.calendar.nextPeriod}
         >
@@ -270,7 +271,7 @@ export function CalendarPage() {
         </button>
       </header>
 
-      <div className="grid grid-cols-7 gap-1 px-2 text-center text-xs text-white/40">
+      <div className="grid grid-cols-7 gap-1 px-2 text-center text-xs text-app-fg/40">
         {ru.calendar.weekdayNamesShort.map((name) => (
           <div key={name} className="py-1">
             {name}
@@ -283,7 +284,7 @@ export function CalendarPage() {
           сам скроллер раньше начинался без отступа — ровно на границе своей
           области клиппинга, — и обводка обрезалась на паре пикселей на любом
           месяце, чья первая неделя содержит праздник. */}
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-32">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pt-1 pb-[calc(8rem+var(--tabbar-h))]">
         {weeks.map((week) => (
           <div key={toISODate(week[0])} className="grid grid-cols-7 gap-1">
             {week.map((date) => {
@@ -311,13 +312,13 @@ export function CalendarPage() {
                   // обводку: воскресный праздник иначе неотличим от обычного
                   // воскресенья, а именно в нём другой множитель.
                   className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-lg text-sm ${
-                    inPeriod ? "bg-white/5 active:bg-white/10" : "opacity-20"
+                    inPeriod ? "bg-app-fg/5 active:bg-app-fg/10" : "opacity-20"
                   } ${holiday && inPeriod ? "ring-1 ring-app-holiday/50" : ""} ${
                     holiday && inPeriod
                       ? "text-app-holiday"
                       : isWeekend && inPeriod
-                        ? "text-app-accent"
-                        : "text-white"
+                        ? "text-app-accent-text"
+                        : "text-app-fg"
                   }`}
                 >
                   <span>{date.getDate()}</span>
@@ -338,7 +339,7 @@ export function CalendarPage() {
                     // max-w-full + truncate: ячейка шириной 50px, и число часов
                     // в несколько цифр иначе вылезает на соседние дни
                     // (инвариант 26 — большие значения не ломают вёрстку).
-                    <span className="max-w-full truncate text-[10px] text-white/50">
+                    <span className="max-w-full truncate text-[10px] text-app-fg/50">
                       {dayHours}
                       {ru.calendar.hoursShort}
                     </span>
@@ -348,13 +349,6 @@ export function CalendarPage() {
             })}
           </div>
         ))}
-
-        {/* Временный индикатор сборки: тестирование идёт удалённо (раздел 12 ТЗ), и без него
-            неотличимо «баг не исправлен» от «на телефоне закешировалась старая версия».
-            Переехать в экран настроек (раздел 7.4), когда тот появится в блоке 6. */}
-        <p className="mt-auto pt-4 text-center text-[10px] text-white/25">
-          v{__APP_VERSION__}{__BUILD_SHA__ && ` · ${__BUILD_SHA__}`}
-        </p>
       </div>
 
       {/* Раздел 8.1: «тап разворачивает полную расшифровку». Панель целиком —
@@ -364,12 +358,12 @@ export function CalendarPage() {
         type="button"
         onClick={() => navigate(`/period?year=${viewed.year}&month=${viewed.month}`)}
         aria-label={ru.period.openSummary}
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-app-bg/95 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 text-left backdrop-blur active:bg-white/5"
+        className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-app-fg/10 bg-app-bg/95 px-4 pb-3 pt-3 text-left backdrop-blur active:bg-app-fg/5"
       >
         {/* Раздел 7.1: «строкой выше мелко: сравнение с прошлым периодом
             (например «+340 zł») и остаток до нормы часов». Знак берётся из
             значения, отдельного ключа в словаре ТЗ не предполагает. */}
-        <div className="flex items-baseline gap-3 text-xs text-white/50">
+        <div className="flex items-baseline gap-3 text-xs text-app-fg/50">
           {delta !== null && (
             <span>
               {delta >= 0 ? "+" : "−"}
@@ -384,7 +378,7 @@ export function CalendarPage() {
           <span className="text-2xl font-semibold">
             {(totals?.amount ?? 0).toFixed(2)} {settings.currency}
           </span>
-          <span className="text-lg text-white/70">
+          <span className="text-lg text-app-fg/70">
             {totals?.total_hours ?? 0} {ru.calendar.hoursShort}
           </span>
         </div>
@@ -409,15 +403,15 @@ export function CalendarPage() {
           // панель итогов накрывала нижние 44px шторки, то есть кнопку
           // «Закрыть» целиком: нажатие уходило в панель и вместо закрытия
           // открывало расшифровку периода.
-          className="day-sheet-overlay fixed inset-0 z-30 flex items-end bg-black/50"
+          className="day-sheet-overlay fixed inset-0 z-30 flex items-end bg-app-scrim/50"
           onClick={() => (requestCloseDayRef.current ? requestCloseDayRef.current() : setOpenDayDate(null))}
         >
           {/* Лимит высоты (85dvh) и анимация появления живут в .day-sheet — на
               всей панели, а не на внутреннем скроллере DayScreen: ручка, дата
               и p-4 обёртки шли сверх лимита и панель занимала 94% экрана. */}
-          <div className="day-sheet flex w-full flex-col rounded-t-2xl bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" />
-            <p className="mb-2 text-sm text-white/50">{formatDayTitle(openDayDate)}</p>
+          <div className="day-sheet flex w-full flex-col rounded-t-2xl bg-app-surface p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-app-fg/20" />
+            <p className="mb-2 text-sm text-app-fg/50">{formatDayTitle(openDayDate)}</p>
             <DayScreen
               date={openDayDate}
               userId={userId}
@@ -449,18 +443,20 @@ export function CalendarPage() {
           пользователь смотрит на изменившийся итог, либо двигает их вверх и
           даёт скачок вёрстки. */}
       {pendingUndo && (
-        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2 shadow-lg">
+        <div className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center justify-between gap-3 rounded-xl bg-app-surface-2 px-4 py-2 shadow-lg">
           <span className="text-sm">{ru.day.deletedNotice}</span>
           {/* min-h-11 поднимает область нажатия до 44px (была 20px), -mr-2
               компенсирует добавленный padding, чтобы плашка не растолстела. */}
           <button
-            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent"
+            className="-mr-2 min-h-11 shrink-0 px-3 text-sm font-semibold text-app-accent-text"
             onClick={handleUndoDelete}
           >
             {ru.day.undo}
           </button>
         </div>
       )}
+
+      <TabBar />
     </div>
   );
 }

@@ -726,20 +726,20 @@ export function DayScreen({
   // переоткрытию честнее и короче.
   if (period.is_closed) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
-        <p className="rounded-lg bg-white/5 px-3 py-2 text-sm text-white/60">{ru.day.closedPeriodNotice}</p>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)] text-app-fg">
+        <p className="rounded-lg bg-app-fg/5 px-3 py-2 text-sm text-app-fg/60">{ru.day.closedPeriodNotice}</p>
 
         {/* entries === undefined — это «ещё читаем из Dexie», а не «записей нет»:
             иначе шторка на кадр показывает «за этот день записей нет» и тут же
             подменяет его списком. */}
-        {entries && entries.length === 0 && <p className="text-sm text-white/40">{ru.day.closedPeriodEmpty}</p>}
+        {entries && entries.length === 0 && <p className="text-sm text-app-fg/40">{ru.day.closedPeriodEmpty}</p>}
         {entries && entries.length > 0 && (
-          <ul className="flex flex-col divide-y divide-white/5">
+          <ul className="flex flex-col divide-y divide-app-fg/5">
             {entries.map((e) => (
               <li key={e.id} className="flex items-start justify-between gap-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm">{dayTypeById.get(e.day_type_id)?.name ?? "—"}</p>
-                  <p className="truncate text-xs text-white/40">
+                  <p className="truncate text-xs text-app-fg/40">
                     {formatEntryDetail(e, dayTypeById.get(e.day_type_id)?.pay_mode)}
                   </p>
                 </div>
@@ -752,12 +752,12 @@ export function DayScreen({
         )}
 
         <button
-          className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+          className="min-h-11 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
           onClick={onOpenPeriod}
         >
           {ru.day.closedPeriodAction}
         </button>
-        <button className="min-h-11 rounded-lg bg-white/5 py-3 text-sm active:bg-white/10" onClick={onClose}>
+        <button className="min-h-11 rounded-lg bg-app-fg/5 py-3 text-sm active:bg-app-fg/10" onClick={onClose}>
           {ru.day.close}
         </button>
       </div>
@@ -776,7 +776,7 @@ export function DayScreen({
     // возможно только движение вверх-вниз. Двум внутренним лентам ниже
     // (типы дня и вкладки записей) возвращён touch-pan-x — они прокручиваются
     // сами и это единственное исключение.
-    <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overflow-x-hidden pb-[calc(env(safe-area-inset-bottom)+1rem)] text-white">
+    <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overflow-x-hidden pb-[calc(env(safe-area-inset-bottom)+1rem)] text-app-fg">
       {/* Полоска записей — только когда их больше одной: обычный день с одной
           записью должен выглядеть ровно как раньше. */}
       {entries && entries.length > 1 && (
@@ -786,7 +786,7 @@ export function DayScreen({
               key={e.id}
               onClick={() => handleSelectEntry(e.id)}
               className={`min-h-11 shrink-0 rounded-lg px-3 text-sm ${
-                e.id === entry?.id ? "bg-white/15 text-white" : "bg-white/5 text-white/60"
+                e.id === entry?.id ? "bg-app-fg/15 text-app-fg" : "bg-app-fg/5 text-app-fg/60"
               }`}
             >
               {index + 1}. {dayTypeById.get(e.day_type_id)?.name} · {formatHours(e.hours)}
@@ -823,7 +823,7 @@ export function DayScreen({
           margin нельзя: он вернул бы ряд на кромку скроллера, и верхушку
           срезал бы уже он. */}
       <div className="flex shrink-0 touch-pan-x gap-3 overflow-x-auto pt-1 pb-1">
-        {activeDayTypes.length === 0 && <p className="text-sm text-white/50">{ru.day.noDayTypes}</p>}
+        {activeDayTypes.length === 0 && <p className="text-sm text-app-fg/50">{ru.day.noDayTypes}</p>}
         {activeDayTypes.map((dt) => {
           const isSelected = draft?.day_type_id === dt.id;
           return (
@@ -837,8 +837,8 @@ export function DayScreen({
                   доступное имя кнопки превращается в «Н Ночная смена». */}
               <span
                 aria-hidden
-                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-semibold text-slate-900 ${
-                  isSelected ? "ring-2 ring-white" : ""
+                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-semibold text-app-accent-fg ${
+                  isSelected ? "ring-2 ring-app-fg" : ""
                 }`}
                 style={{ backgroundColor: dt.color }}
               >
@@ -846,7 +846,7 @@ export function DayScreen({
               </span>
               {/* Имя под кружком: значок из 1–3 символов сам по себе опознаётся
                   не всегда, а «Отпуск» и «Отгул» дают одну и ту же букву. */}
-              <span className={`w-full truncate text-center text-[11px] ${isSelected ? "text-white" : "text-white/50"}`}>
+              <span className={`w-full truncate text-center text-[11px] ${isSelected ? "text-app-fg" : "text-app-fg/50"}`}>
                 {dt.name}
               </span>
             </button>
@@ -857,10 +857,10 @@ export function DayScreen({
           aria-label={ru.day.createDayType}
           className="flex w-16 shrink-0 flex-col items-center gap-1"
         >
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-dashed border-white/30 text-xl text-white/60">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-dashed border-app-fg/30 text-xl text-app-fg/60">
             +
           </span>
-          <span className="w-full truncate text-center text-[11px] text-white/50">{ru.day.createDayTypeShort}</span>
+          <span className="w-full truncate text-center text-[11px] text-app-fg/50">{ru.day.createDayTypeShort}</span>
         </button>
       </div>
 
@@ -869,18 +869,18 @@ export function DayScreen({
           помещается) и не атрибутом title: на телефоне тултипа не существует,
           и поле молча не делало бы ничего. Высота зарезервирована — иначе
           выбор типа с заметкой сдвигал бы вниз всю шторку. */}
-      <p className="-mt-2 min-h-[1rem] shrink-0 truncate text-xs text-white/40">{dayType?.note ?? ""}</p>
+      <p className="-mt-2 min-h-[1rem] shrink-0 truncate text-xs text-app-fg/40">{dayType?.note ?? ""}</p>
 
       {draft && dayType && (
         <>
           <div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-white/50" htmlFor="day-hours">{ru.day.hours}</label>
+              <label className="text-xs text-app-fg/50" htmlFor="day-hours">{ru.day.hours}</label>
               {/* Инвариант 57: значение, отличающееся от того, что дал бы
                   выбор этого типа дня заново, помечается — иначе не видно,
                   что́ пользователь изменил руками. */}
               {hoursDiffersFromDefault && (
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/50">
+                <span className="rounded-full bg-app-fg/10 px-2 py-0.5 text-[10px] text-app-fg/50">
                   {ru.day.differsFromDayTypeDefault}
                 </span>
               )}
@@ -889,7 +889,7 @@ export function DayScreen({
                 свободно редактируемым (раздел 9: ничего не блокируется). */}
             <NumberInput
               id="day-hours"
-              className="mt-1 w-24 rounded-lg bg-white/5 px-2 py-2 text-center text-lg"
+              className="mt-1 w-24 rounded-lg bg-app-fg/5 px-2 py-2 text-center text-lg"
               value={draft.hours}
               onChange={handleHoursChange}
               // Выведенная из времён длительность хранится неокруглённой
@@ -897,7 +897,7 @@ export function DayScreen({
               // В поле шириной 80px её показывает formatHours.
               format={formatHours}
             />
-            <p className={`mt-1 text-xs text-white/40 ${showManyHoursHint ? "" : "invisible"}`}>
+            <p className={`mt-1 text-xs text-app-fg/40 ${showManyHoursHint ? "" : "invisible"}`}>
               {ru.day.hintManyHours}
             </p>
           </div>
@@ -912,28 +912,28 @@ export function DayScreen({
           {dayType.pay_mode === "hourly" || dayType.pay_mode === "unpaid" ? (
             <div className={`grid grid-cols-2 gap-3 ${isUnpaidWithoutOverride ? "opacity-60" : ""}`}>
               <div>
-                <label className="text-xs text-white/50" htmlFor="day-multiplier">{ru.day.multiplier}</label>
+                <label className="text-xs text-app-fg/50" htmlFor="day-multiplier">{ru.day.multiplier}</label>
                 <NumberInput
                   id="day-multiplier"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
+                  className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-lg"
                   value={draft.multiplier}
                   onChange={handleMultiplierChange}
                 />
                 {/* Строка видна всегда, поэтому резервировать высоту через
                     invisible больше не нужно — скачков вёрстки не будет. */}
-                <p className="mt-1 text-xs text-white/40">
+                <p className="mt-1 text-xs text-app-fg/40">
                   {sourceLabel ? `${sourceLabel}, ×${draft.multiplier}` : `×${draft.multiplier}`}
                 </p>
               </div>
               <div>
-                <label className="text-xs text-white/50" htmlFor="day-rate">{ru.day.rate}</label>
+                <label className="text-xs text-app-fg/50" htmlFor="day-rate">{ru.day.rate}</label>
                 <NumberInput
                   id="day-rate"
-                  className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-lg"
+                  className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-lg"
                   value={draft.rate_per_hour}
                   onChange={handleRateChange}
                 />
-                <p className={`mt-1 text-xs text-white/40 ${showZeroRateHint ? "" : "invisible"}`}>
+                <p className={`mt-1 text-xs text-app-fg/40 ${showZeroRateHint ? "" : "invisible"}`}>
                   {ru.day.hintZeroRate}
                 </p>
               </div>
@@ -942,7 +942,7 @@ export function DayScreen({
             // Only fixed_amount types land here now (hourly and unpaid both use
             // the grid above) — min-h keeps this plate's height close enough to
             // the grid's that the sheet doesn't visibly jump when switching.
-            <div className="flex min-h-[92px] items-start rounded-lg bg-white/5 px-3 py-2 text-sm text-white/50">
+            <div className="flex min-h-[92px] items-start rounded-lg bg-app-fg/5 px-3 py-2 text-sm text-app-fg/50">
               {ru.day.payModeFixedAmount}
             </div>
           )}
@@ -958,14 +958,14 @@ export function DayScreen({
               суммы. */}
           <button
             onClick={() => onOpenHolidays(holiday ? {} : { addDate: date })}
-            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2 text-left active:bg-app-fg/10"
           >
             {/* min-w-0 + truncate: имя праздника пользовательское и длины
                 произвольной, а выталкивать кнопку за край нельзя (инвариант 26). */}
-            <span className="min-w-0 truncate text-xs text-white/50">
+            <span className="min-w-0 truncate text-xs text-app-fg/50">
               {holiday ? `${ru.day.holidayRowPrefix} ${holiday.name}` : ru.day.holidayRowNone}
             </span>
-            <span className="shrink-0 text-xs font-semibold text-app-accent">
+            <span className="shrink-0 text-xs font-semibold text-app-accent-text">
               {holiday ? ru.day.holidayRowEdit : ru.day.holidayRowAdd}
             </span>
           </button>
@@ -977,10 +977,10 @@ export function DayScreen({
           {showNoBaseRateHint && (
             <button
               onClick={onOpenPeriod}
-              className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+              className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2 text-left active:bg-app-fg/10"
             >
-              <span className="text-xs text-white/50">{ru.day.hintNoBaseRate}</span>
-              <span className="shrink-0 text-xs font-semibold text-app-accent">{ru.day.hintNoBaseRateAction}</span>
+              <span className="text-xs text-app-fg/50">{ru.day.hintNoBaseRate}</span>
+              <span className="shrink-0 text-xs font-semibold text-app-accent-text">{ru.day.hintNoBaseRateAction}</span>
             </button>
           )}
 
@@ -997,10 +997,10 @@ export function DayScreen({
             <button
               onClick={() => setShiftTimesOpen((open) => !open)}
               aria-expanded={shiftTimesOpen}
-              className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+              className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2 text-left active:bg-app-fg/10"
             >
-              <span className="text-xs text-white/50">{ru.day.shiftTimes}</span>
-              <span className="shrink-0 text-xs font-semibold text-app-accent">
+              <span className="text-xs text-app-fg/50">{ru.day.shiftTimes}</span>
+              <span className="shrink-0 text-xs font-semibold text-app-accent-text">
                 {shiftTimesOpen ? ru.day.shiftTimesHide : ru.day.shiftTimesShow}
               </span>
             </button>
@@ -1009,21 +1009,21 @@ export function DayScreen({
               <>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-white/50" htmlFor="day-start-time">{ru.day.startTime}</label>
+                    <label className="text-xs text-app-fg/50" htmlFor="day-start-time">{ru.day.startTime}</label>
                     <input
                       id="day-start-time"
                       type="time"
-                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2"
                       value={draft.start_time ?? ""}
                       onChange={(e) => handleShiftTimeChange({ start_time: e.target.value || null })}
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-white/50" htmlFor="day-end-time">{ru.day.endTime}</label>
+                    <label className="text-xs text-app-fg/50" htmlFor="day-end-time">{ru.day.endTime}</label>
                     <input
                       id="day-end-time"
                       type="time"
-                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2"
                       value={draft.end_time ?? ""}
                       onChange={(e) => handleShiftTimeChange({ end_time: e.target.value || null })}
                     />
@@ -1032,12 +1032,12 @@ export function DayScreen({
 
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-white/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
+                    <label className="text-xs text-app-fg/50" htmlFor="day-break-minutes">{ru.day.breakMinutes}</label>
                     <input
                       id="day-break-minutes"
                       type="number"
                       inputMode="numeric"
-                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2"
                       value={draft.break_minutes ?? ""}
                       onChange={(e) => {
                         if (e.target.value === "") {
@@ -1053,14 +1053,14 @@ export function DayScreen({
                     {/* Новое понятие (согласовано отдельно, вне исходного ТЗ):
                         сколько минут перерыва оплачивается. 0 — как и раньше,
                         перерыв целиком неоплачиваемый. */}
-                    <label className="text-xs text-white/50" htmlFor="day-paid-break-minutes">
+                    <label className="text-xs text-app-fg/50" htmlFor="day-paid-break-minutes">
                       {ru.day.paidBreakMinutes}
                     </label>
                     <input
                       id="day-paid-break-minutes"
                       type="number"
                       inputMode="numeric"
-                      className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2"
+                      className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2"
                       value={draft.paid_break_minutes ?? ""}
                       onChange={(e) => {
                         if (e.target.value === "") {
@@ -1077,7 +1077,7 @@ export function DayScreen({
                 {/* Инвариант 30 (обобщённый на оплачиваемый перерыв):
                     неоплачиваемая часть перерыва длиннее смены —
                     предупреждение, а не запрет. Высота зарезервирована. */}
-                <p className={`mt-1 text-xs text-white/40 ${duration?.break_exceeds_shift ? "" : "invisible"}`}>
+                <p className={`mt-1 text-xs text-app-fg/40 ${duration?.break_exceeds_shift ? "" : "invisible"}`}>
                   {ru.day.hintBreakExceedsShift}
                 </p>
 
@@ -1087,7 +1087,7 @@ export function DayScreen({
                     время получается той же неокруглённой алгеброй (см.
                     resolveDuration), и десятичный хвост должен выглядеть
                     одинаково в обоих местах. */}
-                <p className="mt-1 text-xs text-white/40">
+                <p className="mt-1 text-xs text-app-fg/40">
                   {ru.day.totalShiftTime}: {duration ? formatHours(duration.totalMinutes / 60) : "—"}{" "}
                   {ru.calendar.hoursShort}
                 </p>
@@ -1097,7 +1097,7 @@ export function DayScreen({
                     кнопка, появляющаяся сама, сдвигала бы поля ровно тогда,
                     когда человек в них целится. */}
                 <div className="flex min-h-11 items-center justify-between gap-3">
-                  <span className="min-w-0 truncate text-xs text-white/40">
+                  <span className="min-w-0 truncate text-xs text-app-fg/40">
                     {duration?.derived
                       ? ru.day.durationDerived
                       : duration?.can_derive
@@ -1111,7 +1111,7 @@ export function DayScreen({
                     // сдвигает, а px-2 добавляет запаса по горизонтали.
                     <button
                       onClick={handleRestoreDurationLink}
-                      className="flex min-h-11 shrink-0 items-center px-2 text-xs font-semibold text-app-accent active:opacity-70"
+                      className="flex min-h-11 shrink-0 items-center px-2 text-xs font-semibold text-app-accent-text active:opacity-70"
                     >
                       {ru.day.durationRestoreLink}
                     </button>
@@ -1121,7 +1121,7 @@ export function DayScreen({
             )}
           </div>
 
-          <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg bg-app-fg/5 px-3 py-2">
             <span className="text-sm">{ru.day.manualAmountToggle}</span>
             {/* Область нажатия 44px по высоте, дорожка внутри остаётся 24px:
                 сам переключатель ростом с дорожку — цель в 24px, вдвое меньше
@@ -1134,7 +1134,7 @@ export function DayScreen({
               className="-my-2 flex h-11 w-11 items-center justify-end"
             >
               <span
-                className={`relative block h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-white/20"}`}
+                className={`relative block h-6 w-11 rounded-full transition-colors ${isManualAmount ? "bg-app-accent" : "bg-app-fg/20"}`}
               >
                 {/* Absolute + left, not transform — a translate-based knob depends on the
                     parent not being a flex/centered container; absolute positioning against
@@ -1149,11 +1149,11 @@ export function DayScreen({
           </div>
 
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-amount">{ru.day.amount}</label>
+            <label className="text-xs text-app-fg/50" htmlFor="day-amount">{ru.day.amount}</label>
             {/* Валюта в одной строке с числом: отдельным <p> в 24px под полем она
                 читалась как ещё одно поле. min-w-0 обязателен — без него flex-элемент
                 с длинным числом не сожмётся и вытолкнет валюту за край. */}
-            <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+            <div className="mt-1 flex items-center gap-2 rounded-lg bg-app-fg/5 px-2">
               <NumberInput
                 id="day-amount"
                 disabled={!isManualAmount}
@@ -1161,16 +1161,16 @@ export function DayScreen({
                 value={isManualAmount ? (draft.amount_override ?? 0) : draft.amount}
                 onChange={handleAmountOverrideChange}
               />
-              <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+              <span className="shrink-0 text-sm text-app-fg/50">{settings.currency}</span>
             </div>
-            <p className={`mt-1 text-xs text-white/40 ${amountHint ? "" : "invisible"}`}>{amountHint ?? " "}</p>
+            <p className={`mt-1 text-xs text-app-fg/40 ${amountHint ? "" : "invisible"}`}>{amountHint ?? " "}</p>
           </div>
 
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-note">{ru.day.note}</label>
+            <label className="text-xs text-app-fg/50" htmlFor="day-note">{ru.day.note}</label>
             <textarea
               id="day-note"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-2 text-sm"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-2 text-sm"
               placeholder={ru.day.notePlaceholder}
               value={draft.note}
               onChange={(e) => handleNoteChange(e.target.value)}
@@ -1179,14 +1179,14 @@ export function DayScreen({
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleAddEntry}>
+            <button className="min-h-11 py-3 text-sm text-app-fg/50 active:text-app-fg/70" onClick={handleAddEntry}>
               {ru.day.addEntry}
             </button>
             {/* Только для строки, которая уже есть в базе: у начатой новой
                 записи удалять нечего, а entry в этот момент показывает первую
                 запись дня — кнопка удалила бы чужую. */}
             {entry && !creatingNew && (
-              <button className="min-h-11 py-3 text-sm text-white/50 active:text-white/70" onClick={handleDelete}>
+              <button className="min-h-11 py-3 text-sm text-app-fg/50 active:text-app-fg/70" onClick={handleDelete}>
                 {ru.day.deleteEntry}
               </button>
             )}
@@ -1198,7 +1198,7 @@ export function DayScreen({
           заканчивается ввод смены. Неактивна, когда сохранять нечего, — это
           видимое состояние, а не молчаливое бездействие. */}
       <button
-        className="min-h-11 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80 disabled:opacity-40"
+        className="min-h-11 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80 disabled:opacity-40"
         disabled={!isDirty || saving}
         onClick={() => void handleSave()}
       >
@@ -1206,7 +1206,7 @@ export function DayScreen({
       </button>
 
       <button
-        className="rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+        className="rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
         onClick={() => guardDraft(onClose)}
       >
         {ru.day.close}
@@ -1217,18 +1217,18 @@ export function DayScreen({
           случайный тап мимо не должен стоить смены. */}
       {pendingDiscard && (
         <div
-          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-app-scrim/60 p-6"
           onClick={() => setPendingDiscard(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 text-white"
+            className="w-full max-w-sm rounded-2xl bg-app-surface p-4 text-app-fg"
             onClick={(event) => event.stopPropagation()}
           >
             <p className="text-base font-semibold">{ru.day.unsavedTitle}</p>
-            <p className="mt-2 text-sm text-white/50">{ru.day.unsavedBody}</p>
+            <p className="mt-2 text-sm text-app-fg/50">{ru.day.unsavedBody}</p>
             <div className="mt-4 flex gap-3">
               <button
-                className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+                className="min-h-11 flex-1 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
                 onClick={() => {
                   const action = pendingDiscard;
                   setPendingDiscard(null);
@@ -1244,7 +1244,7 @@ export function DayScreen({
                 {ru.day.unsavedDiscard}
               </button>
               <button
-                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
                 onClick={() => {
                   const action = pendingDiscard;
                   setPendingDiscard(null);

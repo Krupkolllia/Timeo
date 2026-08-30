@@ -10,7 +10,7 @@ export function UpdateBanner() {
   return (
     <button
       onClick={applyUpdate}
-      className="fixed inset-x-0 bottom-0 z-50 bg-slate-800/95 px-4 py-2 text-center text-xs text-white backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-50 bg-app-surface-2/95 px-4 py-2 text-center text-xs text-app-fg backdrop-blur"
     >
       {ru.app.updateAvailable}
     </button>

@@ -132,12 +132,6 @@ describe("CalendarPage — сетка", () => {
     await waitFor(() => expect(dayCell("2026-08-10").querySelectorAll("span[style]")).toHaveLength(3));
   });
 
-  it("показывает версию сборки", async () => {
-    renderCalendar();
-    await ready();
-    expect(screen.getByText(/^v\d+\.\d+\.\d+/)).toBeInTheDocument();
-  });
-
   it("даёт скроллеру верхний отступ, равный зазору между строк недель", async () => {
     // Часть бага 1, проверяемая без вёрстки: у скроллера должен быть тот же
     // отступ сверху, что и gap-1 между строками, иначе праздничная ячейка в
@@ -613,8 +607,8 @@ describe("CalendarPage — праздники (раздел 8.1)", () => {
     expect(holidayCell.className).toContain("text-app-holiday");
     // Суббота остаётся жёлтой, будень — белым: три состояния различимы.
     // 22-е, а не 15-е: 15 августа — засеянный праздник, и его подпись другая.
-    expect(dayCell("2026-08-22").className).toContain("text-app-accent");
-    expect(dayCell("2026-08-11").className).toContain("text-white");
+    expect(dayCell("2026-08-22").className).toContain("text-app-accent-text");
+    expect(dayCell("2026-08-11").className).toContain("text-app-fg");
   });
 
   it("мягко удалённый праздник не красит ячейку (инвариант 38)", async () => {

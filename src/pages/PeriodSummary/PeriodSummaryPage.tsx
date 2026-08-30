@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
+import { TabBar } from "@/components/TabBar";
 import { db } from "@/db/db";
 import { getLocalUserId } from "@/db/localUser";
 import {
@@ -182,7 +183,7 @@ export function PeriodSummaryPage() {
 
   if (!settings || !viewed || !range || !period) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-white/50">{ru.calendar.loading}</div>
+      <div className="flex min-h-dvh items-center justify-center bg-app-bg text-app-fg/50">{ru.calendar.loading}</div>
     );
   }
 
@@ -197,21 +198,27 @@ export function PeriodSummaryPage() {
   const isClosed = period.is_closed;
   const rateValue = rateDraft ?? period.base_rate;
   const rateChanged = rateValue !== period.base_rate;
+  // Часть 2.3: без параметров экран открыт вкладкой «Период», а не тапом по
+  // панели итогов календаря — в этом случае возвращаться некуда, «назад»
+  // прячется, и панель вкладок встаёт на её обычное место снизу.
+  const isTab = searchParams.get("year") === null && searchParams.get("month") === null;
 
   return (
     // h-dvh, а не min-h-dvh: без ограниченной высоты у flex-родителя
     // overflow-y-auto на списке не срабатывает, скроллится документ целиком, и
     // на месяце из 26 записей кнопка «назад» уезжает за верхний край — вернуться
     // можно только пролистав весь список обратно.
-    <div className="flex h-dvh flex-col bg-app-bg text-white">
+    <div className="flex h-dvh flex-col bg-app-bg text-app-fg">
       <header className="flex shrink-0 items-center gap-1 px-2 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-2">
-        <button
-          className="rounded-full p-3 text-xl text-white/70 active:bg-white/10"
-          onClick={goBack}
-          aria-label={ru.period.back}
-        >
-          ‹
-        </button>
+        {!isTab && (
+          <button
+            className="rounded-full p-3 text-xl text-app-fg/70 active:bg-app-fg/10"
+            onClick={goBack}
+            aria-label={ru.period.back}
+          >
+            ‹
+          </button>
+        )}
         <span className="text-lg font-semibold tracking-tight">
           {ru.calendar.monthNames[label.month - 1]} {label.year}
         </span>
@@ -219,17 +226,21 @@ export function PeriodSummaryPage() {
 
       {/* min-h-0 обязателен: без него flex-элемент не сжимается ниже своего
           контента и overflow-y-auto остаётся бездействующим. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
+      <div
+        className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 ${
+          isTab ? "pb-[calc(var(--tabbar-h)+1rem)]" : "pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
+        }`}
+      >
         {isClosed && (
-          <p className="rounded-xl bg-white/5 px-3 py-2 text-sm text-white/60">{ru.period.closedBanner}</p>
+          <p className="rounded-xl bg-app-fg/5 px-3 py-2 text-sm text-app-fg/60">{ru.period.closedBanner}</p>
         )}
 
         <div>
-          <label className="text-xs text-white/50" htmlFor="period-base-rate">{ru.period.baseRate}</label>
+          <label className="text-xs text-app-fg/50" htmlFor="period-base-rate">{ru.period.baseRate}</label>
           <div className="mt-1 flex items-center gap-2">
             {/* min-w-0 — иначе длинное число распирает flex-строку и выталкивает
                 валюту с кнопкой за край экрана (инвариант 26). */}
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-white/5 px-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-app-fg/5 px-2">
               <NumberInput
                 id="period-base-rate"
                 disabled={isClosed}
@@ -237,11 +248,11 @@ export function PeriodSummaryPage() {
                 value={rateValue}
                 onChange={setRateDraft}
               />
-              <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+              <span className="shrink-0 text-sm text-app-fg/50">{settings.currency}</span>
             </div>
             {rateChanged && !isClosed && (
               <button
-                className="min-h-11 shrink-0 rounded-lg bg-app-accent px-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                className="min-h-11 shrink-0 rounded-lg bg-app-accent px-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
                 onClick={() => setRateDialogOpen(true)}
               >
                 {ru.period.baseRateSave}
@@ -252,30 +263,30 @@ export function PeriodSummaryPage() {
               человек вписал итог за месяц, часы по ней не считаются вовсе, и
               предупреждение «часы будут считаться по нулю» было бы просто
               неправдой на экране, который обязан объяснять числа (инвариант 55). */}
-          <p className={`mt-1 text-xs text-white/40 ${rateValue === 0 && !period.is_manual ? "" : "invisible"}`}>
+          <p className={`mt-1 text-xs text-app-fg/40 ${rateValue === 0 && !period.is_manual ? "" : "invisible"}`}>
             {ru.period.hintZeroBaseRate}
           </p>
           {/* Высота строки зарезервирована всегда: появляясь на 4 секунды, она
               иначе сдвигает вниз весь экран и возвращает обратно. */}
-          <p className={`text-xs text-white/40 ${recalculatedCount === null ? "invisible" : ""}`}>
+          <p className={`text-xs text-app-fg/40 ${recalculatedCount === null ? "invisible" : ""}`}>
             {ru.period.recalculatedNotice}: {recalculatedCount ?? 0}
           </p>
         </div>
 
         <div>
-          <label className="text-xs text-white/50" htmlFor="period-norm-hours">{ru.period.normHours}</label>
+          <label className="text-xs text-app-fg/50" htmlFor="period-norm-hours">{ru.period.normHours}</label>
           <NumberInput
             id="period-norm-hours"
             disabled={isClosed}
-            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg disabled:opacity-70"
+            className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg disabled:opacity-70"
             value={period.norm_hours}
             onChange={(norm_hours) => void updatePeriod(db, period.id, { norm_hours })}
           />
         </div>
 
         <div>
-          <label className="text-xs text-white/50" htmlFor="period-extra-amount">{ru.period.extraAmount}</label>
-          <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+          <label className="text-xs text-app-fg/50" htmlFor="period-extra-amount">{ru.period.extraAmount}</label>
+          <div className="mt-1 flex items-center gap-2 rounded-lg bg-app-fg/5 px-2">
             <NumberInput
               id="period-extra-amount"
               disabled={isClosed}
@@ -283,9 +294,9 @@ export function PeriodSummaryPage() {
               value={period.extra_amount}
               onChange={(extra_amount) => void updatePeriod(db, period.id, { extra_amount })}
             />
-            <span className="shrink-0 text-sm text-white/50">{settings.currency}</span>
+            <span className="shrink-0 text-sm text-app-fg/50">{settings.currency}</span>
           </div>
-          <p className={`mt-1 text-xs text-white/40 ${period.extra_amount < 0 ? "" : "invisible"}`}>
+          <p className={`mt-1 text-xs text-app-fg/40 ${period.extra_amount < 0 ? "" : "invisible"}`}>
             {ru.period.hintNegativeExtra}
           </p>
           {/* Значение поля — локальный черновик, а не то, что вернул Dexie:
@@ -295,7 +306,7 @@ export function PeriodSummaryPage() {
           <input
             type="text"
             disabled={isClosed}
-            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-sm disabled:opacity-70"
+            className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-sm disabled:opacity-70"
             placeholder={ru.period.extraNotePlaceholder}
             aria-label={ru.period.extraNote}
             value={noteDraft ?? period.extra_note}
@@ -307,11 +318,11 @@ export function PeriodSummaryPage() {
         </div>
 
         <div>
-          <p className="text-xs text-white/50">{ru.period.breakdown}</p>
+          <p className="text-xs text-app-fg/50">{ru.period.breakdown}</p>
           {(entries ?? []).length === 0 ? (
-            <p className="mt-2 text-sm text-white/40">{ru.period.noEntries}</p>
+            <p className="mt-2 text-sm text-app-fg/40">{ru.period.noEntries}</p>
           ) : (
-            <ul className="mt-2 flex flex-col divide-y divide-white/5">
+            <ul className="mt-2 flex flex-col divide-y divide-app-fg/5">
               {(entries ?? []).map((entry) => {
                 const dayType = dayTypeById.get(entry.day_type_id);
                 return (
@@ -320,7 +331,7 @@ export function PeriodSummaryPage() {
                       <p className="truncate text-sm">
                         {formatDayShort(entry.date)} · {dayType?.name ?? "—"}
                       </p>
-                      <p className="truncate text-xs text-white/40">{formatEntryDetail(entry, dayType?.pay_mode)}</p>
+                      <p className="truncate text-xs text-app-fg/40">{formatEntryDetail(entry, dayType?.pay_mode)}</p>
                     </div>
                     <span className="shrink-0 text-sm tabular-nums">{entry.amount.toFixed(2)}</span>
                   </li>
@@ -330,20 +341,20 @@ export function PeriodSummaryPage() {
           )}
         </div>
 
-        <div className="rounded-xl bg-white/5 px-3 py-3">
+        <div className="rounded-xl bg-app-fg/5 px-3 py-3">
           <div className="flex items-baseline justify-between">
-            <span className="text-sm text-white/50">{ru.period.total}</span>
+            <span className="text-sm text-app-fg/50">{ru.period.total}</span>
             <span className="text-2xl font-semibold tabular-nums">
               {(totals?.amount ?? 0).toFixed(2)} {settings.currency}
             </span>
           </div>
-          <div className="mt-1 flex items-baseline justify-between text-sm text-white/50">
+          <div className="mt-1 flex items-baseline justify-between text-sm text-app-fg/50">
             <span>{ru.period.hoursColumn}</span>
             <span className="tabular-nums">
               {totals?.total_hours ?? 0} {ru.calendar.hoursShort}
             </span>
           </div>
-          <div className="mt-1 flex items-baseline justify-between text-sm text-white/50">
+          <div className="mt-1 flex items-baseline justify-between text-sm text-app-fg/50">
             <span>{ru.calendar.remainingToNorm}</span>
             <span className="tabular-nums">
               {totals?.remaining_to_norm ?? 0} {ru.calendar.hoursShort}
@@ -352,7 +363,7 @@ export function PeriodSummaryPage() {
           {/* Снимок остаётся видимым после переоткрытия (инвариант 3) — иначе
               сравнить «до» и «после» правки нечем. */}
           {!isClosed && period.closed_totals && (
-            <p className="mt-2 text-xs text-white/40">
+            <p className="mt-2 text-xs text-app-fg/40">
               {ru.period.snapshot}: {period.closed_totals.amount.toFixed(2)} {settings.currency}
             </p>
           )}
@@ -360,14 +371,14 @@ export function PeriodSummaryPage() {
 
         {isClosed ? (
           <button
-            className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+            className="min-h-11 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
             onClick={() => setReopenConfirmOpen(true)}
           >
             {ru.period.reopen}
           </button>
         ) : (
           <button
-            className="min-h-11 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+            className="min-h-11 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
             onClick={() =>
               void closePeriod(
                 db,
@@ -389,16 +400,16 @@ export function PeriodSummaryPage() {
             туда ведёт панель итогов календаря, одно нажатие с главного экрана.
             return= возвращает на этот же период, как в типах дня и праздниках. */}
         <div>
-          <p className="text-xs text-white/50">{ru.period.dataSection}</p>
+          <p className="text-xs text-app-fg/50">{ru.period.dataSection}</p>
           <div className="mt-2 flex flex-col gap-2">
             <button
-              className="min-h-11 rounded-lg bg-white/5 px-3 py-3 text-left text-sm active:bg-white/10"
+              className="min-h-11 rounded-lg bg-app-fg/5 px-3 py-3 text-left text-sm active:bg-app-fg/10"
               onClick={() => navigate(`/settings/past-periods?return=${encodeURIComponent(summaryPath)}`)}
             >
               {ru.period.pastPeriods}
             </button>
             <button
-              className="min-h-11 rounded-lg bg-white/5 px-3 py-3 text-left text-sm active:bg-white/10"
+              className="min-h-11 rounded-lg bg-app-fg/5 px-3 py-3 text-left text-sm active:bg-app-fg/10"
               onClick={() => navigate(`/settings/export?return=${encodeURIComponent(summaryPath)}`)}
             >
               {ru.period.exportRestore}
@@ -428,24 +439,24 @@ export function PeriodSummaryPage() {
           импорте. Это тот самый случай. */}
       {reopenConfirmOpen && (
         <div
-          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+          className="day-sheet-overlay fixed inset-0 z-40 flex items-center justify-center bg-app-scrim/60 p-6"
           onClick={() => setReopenConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 text-white"
+            className="w-full max-w-sm rounded-2xl bg-app-surface p-4 text-app-fg"
             onClick={(event) => event.stopPropagation()}
           >
             <p className="text-base font-semibold">{ru.period.reopenConfirmTitle}</p>
-            <p className="mt-2 text-sm text-white/50">{ru.period.reopenConfirmBody}</p>
+            <p className="mt-2 text-sm text-app-fg/50">{ru.period.reopenConfirmBody}</p>
             <div className="mt-4 flex gap-3">
               <button
-                className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+                className="min-h-11 flex-1 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
                 onClick={() => setReopenConfirmOpen(false)}
               >
                 {ru.period.cancel}
               </button>
               <button
-                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+                className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
                 onClick={() => {
                   setReopenConfirmOpen(false);
                   void reopenPeriod(db, userId, viewed.year, viewed.month);
@@ -457,6 +468,8 @@ export function PeriodSummaryPage() {
           </div>
         </div>
       )}
+
+      {isTab && <TabBar />}
     </div>
   );
 }

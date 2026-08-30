@@ -19,7 +19,7 @@ interface DayTypeFormProps {
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2">
       <span className="min-w-0 text-sm">{label}</span>
       {/* Область нажатия 44px по высоте при дорожке в 24px — как на экране дня
           (инвариант 59); -my-2 не даёт строке растолстеть. */}
@@ -32,7 +32,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
         className="-my-2 flex h-11 w-11 shrink-0 items-center justify-end"
       >
         <span
-          className={`relative block h-6 w-11 rounded-full transition-colors ${checked ? "bg-app-accent" : "bg-white/20"}`}
+          className={`relative block h-6 w-11 rounded-full transition-colors ${checked ? "bg-app-accent" : "bg-app-fg/20"}`}
         >
           <span
             className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-[left] ${checked ? "left-[22px]" : "left-0.5"}`}
@@ -83,34 +83,34 @@ export function DayTypeForm({
           на 390×844 форма с этим числом полей уходит под нижний край. */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6">
         {/* Раздел 5.3.1: ставка типа дня всегда в контексте периода. */}
-        <p className="text-xs text-white/40">
+        <p className="text-xs text-app-fg/40">
           {periodLabel}
           {baseRate !== null && `, ${ru.dayTypes.periodContextBase} ${baseRate.toFixed(2)} ${currency}`}
         </p>
 
         <div className="flex items-end gap-3">
           <div className="min-w-0 flex-1">
-            <label className="text-xs text-white/50" htmlFor="day-type-name">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-name">
               {ru.dayTypes.name}
             </label>
             <input
               id="day-type-name"
               type="text"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-base"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-base"
               placeholder={ru.dayTypes.namePlaceholder}
               value={draft.name}
               onChange={(event) => patch({ name: event.target.value })}
             />
           </div>
           <div className="w-24 shrink-0">
-            <label className="text-xs text-white/50" htmlFor="day-type-label">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-label">
               {ru.dayTypes.label}
             </label>
             <div className="mt-1 flex items-center gap-2">
               <input
                 id="day-type-label"
                 type="text"
-                className="w-full min-w-0 rounded-lg bg-white/5 px-2 py-3 text-center text-base"
+                className="w-full min-w-0 rounded-lg bg-app-fg/5 px-2 py-3 text-center text-base"
                 value={label}
                 onChange={(event) => {
                   setLabelTouched(true);
@@ -120,7 +120,7 @@ export function DayTypeForm({
               {/* Живой предпросмотр кружка: значок редактируется ради него. */}
               <span
                 aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-slate-900"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-app-accent-fg"
                 style={{ backgroundColor: draft.color }}
               >
                 {label}
@@ -128,10 +128,10 @@ export function DayTypeForm({
             </div>
           </div>
         </div>
-        <p className="-mt-3 text-xs text-white/40">{ru.dayTypes.labelHint}</p>
+        <p className="-mt-3 text-xs text-app-fg/40">{ru.dayTypes.labelHint}</p>
 
         <div>
-          <p className="text-xs text-white/50" id="day-type-color-label">
+          <p className="text-xs text-app-fg/50" id="day-type-color-label">
             {ru.dayTypes.color}
           </p>
           <div className="mt-1 flex flex-wrap gap-2" role="group" aria-labelledby="day-type-color-label">
@@ -142,7 +142,7 @@ export function DayTypeForm({
                 aria-label={color}
                 aria-pressed={draft.color === color}
                 onClick={() => patch({ color })}
-                className={`h-11 w-11 rounded-full ${draft.color === color ? "ring-2 ring-white" : ""}`}
+                className={`h-11 w-11 rounded-full ${draft.color === color ? "ring-2 ring-app-fg" : ""}`}
                 style={{ backgroundColor: color }}
               />
             ))}
@@ -150,13 +150,13 @@ export function DayTypeForm({
         </div>
 
         <div>
-          <label className="text-xs text-white/50" htmlFor="day-type-note">
+          <label className="text-xs text-app-fg/50" htmlFor="day-type-note">
             {ru.dayTypes.note}
           </label>
           <input
             id="day-type-note"
             type="text"
-            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-sm"
+            className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-sm"
             placeholder={ru.dayTypes.notePlaceholder}
             value={draft.note}
             onChange={(event) => patch({ note: event.target.value })}
@@ -164,7 +164,7 @@ export function DayTypeForm({
         </div>
 
         <div>
-          <p className="text-xs text-white/50" id="day-type-pay-mode-label">
+          <p className="text-xs text-app-fg/50" id="day-type-pay-mode-label">
             {ru.dayTypes.payMode}
           </p>
           <div className="mt-1 grid grid-cols-3 gap-2" role="group" aria-labelledby="day-type-pay-mode-label">
@@ -181,7 +181,7 @@ export function DayTypeForm({
                 aria-pressed={draft.pay_mode === mode}
                 onClick={() => patch({ pay_mode: mode })}
                 className={`min-h-11 rounded-lg px-2 py-2 text-xs ${
-                  draft.pay_mode === mode ? "bg-app-accent font-semibold text-slate-900" : "bg-white/5 text-white"
+                  draft.pay_mode === mode ? "bg-app-accent font-semibold text-app-accent-fg" : "bg-app-fg/5 text-app-fg"
                 }`}
               >
                 {title}
@@ -192,28 +192,28 @@ export function DayTypeForm({
 
         {draft.pay_mode === "fixed_amount" && (
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-fixed-amount">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-fixed-amount">
               {ru.dayTypes.fixedAmount}
             </label>
-            <div className="mt-1 flex items-center gap-2 rounded-lg bg-white/5 px-2">
+            <div className="mt-1 flex items-center gap-2 rounded-lg bg-app-fg/5 px-2">
               <NumberInput
                 id="day-type-fixed-amount"
                 className="min-w-0 flex-1 bg-transparent py-3 text-lg outline-none"
                 value={draft.fixed_amount ?? 0}
                 onChange={(fixed_amount) => patch({ fixed_amount })}
               />
-              <span className="shrink-0 text-sm text-white/50">{currency}</span>
+              <span className="shrink-0 text-sm text-app-fg/50">{currency}</span>
             </div>
           </div>
         )}
 
         <div>
-          <label className="text-xs text-white/50" htmlFor="day-type-hours">
+          <label className="text-xs text-app-fg/50" htmlFor="day-type-hours">
             {ru.dayTypes.defaultHours}
           </label>
           <NumberInput
             id="day-type-hours"
-            className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg"
+            className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg"
             value={draft.default_hours}
             onChange={(default_hours) => patch({ default_hours })}
           />
@@ -224,25 +224,25 @@ export function DayTypeForm({
             одного нет — работает "Часы по умолчанию" как и раньше. */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-default-start">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-default-start">
               {ru.dayTypes.defaultStartTime}
             </label>
             <input
               id="day-type-default-start"
               type="time"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3"
               value={draft.default_start ?? ""}
               onChange={(event) => patch({ default_start: event.target.value || null })}
             />
           </div>
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-default-end">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-default-end">
               {ru.dayTypes.defaultEndTime}
             </label>
             <input
               id="day-type-default-end"
               type="time"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3"
               value={draft.default_end ?? ""}
               onChange={(event) => patch({ default_end: event.target.value || null })}
             />
@@ -250,29 +250,29 @@ export function DayTypeForm({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-default-break">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-default-break">
               {ru.dayTypes.defaultBreakMinutes}
             </label>
             <NumberInput
               id="day-type-default-break"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg"
               value={draft.default_break_minutes ?? 0}
               onChange={(value) => patch({ default_break_minutes: value })}
             />
           </div>
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-default-break-paid">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-default-break-paid">
               {ru.dayTypes.defaultBreakPaidMinutes}
             </label>
             <NumberInput
               id="day-type-default-break-paid"
-              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg"
+              className="mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg"
               value={draft.default_break_paid_minutes ?? 0}
               onChange={(value) => patch({ default_break_paid_minutes: value })}
             />
           </div>
         </div>
-        <p className="-mt-2 text-xs text-white/40">{ru.dayTypes.defaultTimesHint}</p>
+        <p className="-mt-2 text-xs text-app-fg/40">{ru.dayTypes.defaultTimesHint}</p>
 
         {/* Замок — отдельный осознанный переключатель, а не побочный эффект
             ввода в поле ставки (раздел 5.3.1). */}
@@ -284,7 +284,7 @@ export function DayTypeForm({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-multiplier">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-multiplier">
               {ru.dayTypes.multiplier}
             </label>
             {/* Поле остаётся редактируемым и при закрытом замке: раздел 9
@@ -293,18 +293,18 @@ export function DayTypeForm({
                 пользователь получит своё число обратно. */}
             <NumberInput
               id="day-type-multiplier"
-              className={`mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg ${isPinned ? "opacity-50" : ""}`}
+              className={`mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg ${isPinned ? "opacity-50" : ""}`}
               value={draft.default_multiplier}
               onChange={(default_multiplier) => patch({ default_multiplier })}
             />
           </div>
           <div>
-            <label className="text-xs text-white/50" htmlFor="day-type-rate">
+            <label className="text-xs text-app-fg/50" htmlFor="day-type-rate">
               {ru.dayTypes.rate}
             </label>
             <NumberInput
               id="day-type-rate"
-              className={`mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg ${isPinned ? "" : "opacity-50"}`}
+              className={`mt-1 w-full rounded-lg bg-app-fg/5 px-2 py-3 text-lg ${isPinned ? "" : "opacity-50"}`}
               value={pinnedRate}
               onChange={(default_rate) => patch({ default_rate })}
             />
@@ -313,7 +313,7 @@ export function DayTypeForm({
 
         {/* Одна строка объяснения на оба поля, высота зарезервирована: без
             min-h появление подсказки дёргало бы вниз всё, что под ней. */}
-        <div className="-mt-2 min-h-[1rem] text-xs text-white/40">
+        <div className="-mt-2 min-h-[1rem] text-xs text-app-fg/40">
           {!isHourly
             ? draft.pay_mode === "unpaid"
               ? ru.dayTypes.hintUnpaid
@@ -329,7 +329,7 @@ export function DayTypeForm({
 
         {/* Раздел 9: предупреждаем, но не запрещаем (инвариант 24). */}
         {(draft.default_multiplier < 0 || (isPinned && pinnedRate < 0)) && (
-          <p className="-mt-3 text-xs text-white/40">
+          <p className="-mt-3 text-xs text-app-fg/40">
             {draft.default_multiplier < 0 ? ru.dayTypes.hintNegativeMultiplier : ru.dayTypes.hintNegativeRate}
           </p>
         )}
@@ -338,10 +338,10 @@ export function DayTypeForm({
           <button
             type="button"
             onClick={onOpenPeriod}
-            className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-left active:bg-white/10"
+            className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2 text-left active:bg-app-fg/10"
           >
-            <span className="text-xs text-white/50">{ru.dayTypes.hintNoBaseRate}</span>
-            <span className="shrink-0 text-xs font-semibold text-app-accent">{ru.dayTypes.hintNoBaseRateAction}</span>
+            <span className="text-xs text-app-fg/50">{ru.dayTypes.hintNoBaseRate}</span>
+            <span className="shrink-0 text-xs font-semibold text-app-accent-text">{ru.dayTypes.hintNoBaseRateAction}</span>
           </button>
         )}
 
@@ -367,17 +367,17 @@ export function DayTypeForm({
       {/* Кнопки — в нижней части экрана и вне скроллера (инвариант 59:
           управление достаётся большим пальцем и не уезжает вместе со списком
           полей). */}
-      <div className="flex shrink-0 gap-3 border-t border-white/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="flex shrink-0 gap-3 border-t border-app-fg/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <button
           type="button"
-          className="min-h-11 flex-1 rounded-lg bg-white/10 py-3 text-sm font-medium active:bg-white/20"
+          className="min-h-11 flex-1 rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20"
           onClick={onCancel}
         >
           {ru.period.cancel}
         </button>
         <button
           type="button"
-          className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-slate-900 active:opacity-80"
+          className="min-h-11 flex-1 rounded-lg bg-app-accent py-3 text-sm font-semibold text-app-accent-fg active:opacity-80"
           // label || derive(...): поле значка можно очистить backspace'ом, и
           // тогда labelTouched уже true, а draft.label пуст — без запасного
           // значения форма молча сохраняла бы пустой кружок, ровно ту

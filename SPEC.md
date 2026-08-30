@@ -356,11 +356,10 @@ the calculation layer and every stored row, for no gain the user can see.
   invariants 28, 30 (generalised to the *unpaid* portion of the break), 31 and 32 hold for it the same
   way they hold for a day's own times.
 
-- **The shift times are shown by a disclosure in the day sheet, not by `settings.show_shift_times`.**
-  The setting exists and still decides the initial state, but nothing could turn it on before block 7,
-  so 6.1 would have been invisible on the device. The sheet carries its own "Время смены" row, and a
-  day whose entry already holds times opens expanded. Block 7's settings toggle simply stops being
-  the only way in.
+- **The shift times are shown by a disclosure in the day sheet, and, since block 7, also by a
+  `settings.show_shift_times` toggle on the settings screen (8.4).** The sheet still carries its own
+  "Время смены" row and a day whose entry already holds times still opens expanded — the settings
+  toggle only changes the default a fresh day starts from.
 
 - **`duration_is_manual` is true on every entry that predates 6.1.** The `version(8)` upgrader sets
   the flag and changes nothing else — no stored `hours`, no `amount`, no `updated_at`, no closed
@@ -378,11 +377,26 @@ the calculation layer and every stored row, for no gain the user can see.
   stays untaken for them and `default_hours` keeps driving new entries exactly as before. Import
   applies the same `0` default to files that predate this field (invariant 50).
 
-- **`settings.total_hours_paid_only` is exposed by a single toggle on the settings stub, not by the
-  real settings screen of 8.4.** Block 7 has not built that screen yet, and a setting nobody could
-  reach would leave 6.5's two possible readings of "total hours" untestable on the device. The one
-  control lives directly on the placeholder page (`SettingsPage.tsx`) until block 7 replaces it with
-  the real screen.
+- **The manifest's `theme_color` (`vite.config.ts`) stays dark in both themes.** The manifest is
+  static and read once at install time, well before `settings.theme` exists to read; the runtime
+  `<meta name="theme-color">` (`index.html`) is what block 7's light theme actually updates, live, via
+  `useTheme`. `apple-mobile-web-app-status-bar-style` also stays `black-translucent`; whether that
+  reads badly under the light theme on-device is a screenshot check, not a code question — recorded
+  here as a known risk, not fixed pre-emptively.
+
+- **`reminder_enabled` and `reminder_time` are settable from block 7's settings screen, but nothing
+  reads them yet.** No notification is scheduled from either field — that is block 9's work. The
+  screen says so plainly rather than implying the toggle already does something.
+
+- **`period_start_day` cannot be changed while any closed period exists** (`setPeriodStartDay`,
+  `src/db/settings.ts`). The field is one global number that `periodForDate()` uses to decide which
+  period *every* day belongs to; shifting it moves days out of a closed period (whose totals are a
+  frozen `closed_totals` snapshot that would not follow them) and into a neighbouring open one (whose
+  totals recompute and would pick the same days back up) — the same hours would be paid twice. A
+  correct fix needs a piecewise period function — a start-day snapshot per period, or a "day changed,
+  effective from" field — which is a rewrite of `lib/calc/period.ts` and every caller, roughly the size
+  of the rest of block 7. Deferred to its own block; the settings screen explains the lock and links to
+  the list of periods instead of hiding the reason.
 
 ### 5.5 `holidays`
 
@@ -716,8 +730,19 @@ Weekends and holidays are visually distinct.
 
 Header: period name, arrows, tap for a month and year picker.
 
-Fixed bottom bar: amount and total hours in large type; above them, in small type, the comparison with
-the previous period and the remaining hours to norm. Tapping expands the full breakdown.
+Above the bottom tab bar: amount and total hours in large type; above them, in small type, the
+comparison with the previous period and the remaining hours to norm. Tapping expands the full
+breakdown.
+
+**Bottom tab bar, block 7.** Four tabs fixed to the bottom of the screen — Calendar, Period, Settings,
+More — replacing the original plan of a settings icon in the calendar header, which had no room left
+once the header carried the month picker and the period arrows. `TabBar` is rendered by each of the
+four top-level screens themselves, not by a shared layout route: the test suite renders pages directly
+in a `MemoryRouter`, and a nested layout route needs `createMemoryRouter`, which trips over
+`AbortSignal` under jsdom on this Node version (invariant 58's flat `routes.tsx`, with an
+`errorElement` per route, stays as-is for the same reason). The two internal screens that render
+inside the bottom sheet or push a full screen (day types, holidays, past periods, export) do not show
+the tab bar; they keep their own back button.
 
 ### 8.2 Day entry
 
@@ -768,20 +793,43 @@ Line by line: date, hours, rate, multiplier, amount. Total at the bottom. The pe
 hours norm are edited here, not in settings. Also here: the extra amount field and the close period
 button.
 
+**Block 7.** Reachable two ways now: as the **Period** tab (showing the period of today's date, no
+back button — there is nowhere to go back to) and, as before, by tapping the calendar's summary panel
+for a specific month (with a back button, and `?year=&month=` in the address). Which one is in play is
+told apart by the query parameters, not by a flag: their absence means "opened as a tab".
+
 ### 8.4 Settings
 
-Only what is not period-specific: base rate and norm **for new periods**, weekend and holiday
-multipliers, period start day, currency, theme, default hours, reminders, export and import, account.
+Only what is not period-specific: base rate and norm **for new periods**, period start day and naming,
+default hours and the total-hours basis, show-shift-times default, currency, theme, reminders, and
+links to day types and to holidays (weekend/holiday multipliers). Export/restore and past periods live
+on the **More** tab (and, unchanged, on the period summary screen) — Settings holds rules, More holds
+data and app info.
 
 A specific period's base rate is edited on its own summary screen. Editing it in settings would leave
 ambiguous which month is meant and would visually contradict period isolation even where the code
-respects it.
+respects it. A note under the new-period fields and a link to the current period's own rate say this
+explicitly, so a rate change is not mistaken for something that recalculates already-created months.
 
 **Deviation, block 5.** The three weekend/holiday multipliers ship on the holidays screen (8.6), not
 here. Nothing in the app could set them before block 7, and a holiday whose multiplier is fixed at 1
 changes no money at all: block 5 would have added a screen listing dates and nothing else. 8.6 is also
 where the user is already thinking about them. Block 7 links to that screen rather than duplicating
 the fields.
+
+**Period start day is locked while a closed period exists** (5.4.1, invariant 4), with the reason shown
+inline and a link to the list of periods. Unlocked, changing it warns that days will move into
+different months before the change is written — there is no confirmation dialog (invariant 56), the
+warning is simply always visible next to the field while it is editable.
+
+### 8.4.1 More
+
+The fourth tab, added in block 7: data and app info, as opposed to Settings' rules. Past periods and
+export/restore (duplicated from the period summary screen — both entry points stay live, by design),
+and an About section with the build version and hash shown large and selectable, since remote testing
+(12) identifies a build from a screenshot of exactly this line. A labelled space is reserved for the
+account that block 8 will add; it stays empty rather than showing a disabled placeholder button, since
+there is nothing yet for such a button to do.
 
 ### 8.5 Day types
 
