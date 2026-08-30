@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { TabBar } from "@/components/TabBar";
 import { ru } from "@/i18n/ru";
+import { useSyncStore } from "@/store/syncStore";
 
 /**
  * Раздел 8.4, часть 4: данные и мета — то, что не «правило», а действие или
@@ -10,6 +11,10 @@ import { ru } from "@/i18n/ru";
  */
 export function MorePage() {
   const navigate = useNavigate();
+  const phase = useSyncStore((state) => state.phase);
+  const account = useSyncStore((state) => state.account);
+  const accountLine =
+    phase === "disabled" ? ru.more.accountDisabled : (account?.email ?? ru.more.accountSignedOut);
 
   return (
     <div className="min-h-dvh bg-app-bg p-4 text-app-fg" style={{ paddingBottom: "calc(var(--tabbar-h) + 1rem)" }}>
@@ -48,9 +53,21 @@ export function MorePage() {
           </div>
         </div>
 
-        {/* Место под аккаунт (блок 8) — место, а не заглушка-кнопка: аккаунта
-            до блока 8 нет, и пустой пункт меню читался бы как поломка. */}
-        <p className="text-xs text-app-fg/40">{ru.more.accountPlaceholder}</p>
+        {/* Раздел 8.4.1: место, которое блок 7 держал под аккаунт, занято им же. */}
+        <div>
+          <p className="text-xs text-app-fg/50">{ru.more.accountSection}</p>
+          <div className="mt-2 flex flex-col gap-1">
+            <button
+              className="min-h-11 rounded-lg bg-app-fg/5 px-3 py-3 text-left text-sm active:bg-app-fg/10"
+              onClick={() => navigate(`/more/account?return=${encodeURIComponent("/more")}`)}
+            >
+              {ru.more.account}
+            </button>
+            {/* Состояние словами прямо здесь: на скриншоте с телефона это
+                единственный способ увидеть, вошёл человек или нет. */}
+            <p className="px-3 text-xs text-app-fg/40">{accountLine}</p>
+          </div>
+        </div>
       </div>
 
       <TabBar />

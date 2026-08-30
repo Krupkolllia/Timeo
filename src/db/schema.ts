@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
 import type { Settings, Period, DayType, Entry, Holiday } from "@/types/models";
+import type { SyncMeta } from "@/db/syncMeta";
 import { roundHours, roundMoney, roundMultiplier } from "@/lib/calc/round";
 import { periodForDate } from "@/lib/calc/period";
 import { deriveDayTypeLabel } from "@/lib/format/dayType";
@@ -10,6 +11,7 @@ export class TimeoDB extends Dexie {
   day_types!: EntityTable<DayType, "id">;
   entries!: EntityTable<Entry, "id">;
   holidays!: EntityTable<Holiday, "id">;
+  sync_meta!: EntityTable<SyncMeta, "user_id">;
 
   constructor(name = "timeo") {
     super(name);
@@ -299,5 +301,18 @@ export class TimeoDB extends Dexie {
           }),
       ]),
     );
+    // Блок 8. Служебная таблица синхронизации: курсоры докачки и водяные знаки
+    // выгрузки, по строке на пользователя. Пользовательских данных в ней нет —
+    // ни в экспорт (инвариант 46), ни в облако она не идёт.
+    //
+    // Пяти таблиц с данными эта версия не касается вовсе: ни одного поля не
+    // добавляется и не переписывается, upgrade-функции нет. Значит, ни одна
+    // сумма и ни один закрытый период измениться не могут (инвариант 2), а
+    // updated_at существующих строк остаётся историческим — ровно как во всех
+    // девяти предыдущих версиях, и по той же причине: первая выгрузка не имеет
+    // права выглядеть как «всё разом изменилось».
+    this.version(10).stores({
+      sync_meta: "user_id",
+    });
   }
 }
