@@ -143,6 +143,7 @@ function parseSettings(value: unknown, now: string): Settings | null {
         ? oneOf(value.preferred_rate_change_mode, RATE_CHANGE_MODES, "recalculate_period")
         : null,
     seeded_holiday_years: seeded,
+    total_hours_paid_only: bool(value.total_hours_paid_only, DEFAULT_SETTINGS.total_hours_paid_only),
   };
 }
 
@@ -198,6 +199,10 @@ function parseDayType(value: unknown, now: string): DayType | null {
     counts_as_work: bool(value.counts_as_work, true),
     counts_toward_norm: bool(value.counts_toward_norm, true),
     default_hours: num(value.default_hours, DEFAULT_SETTINGS.default_hours),
+    default_start: nullableStr(value.default_start),
+    default_end: nullableStr(value.default_end),
+    default_break_minutes: nullableNum(value.default_break_minutes),
+    default_break_paid_minutes: nullableNum(value.default_break_paid_minutes),
     default_multiplier: num(value.default_multiplier, 1),
     default_rate,
     ignore_auto_multipliers: bool(value.ignore_auto_multipliers, false),
@@ -231,6 +236,12 @@ function parseEntry(value: unknown, now: string): Entry | null {
     start_time: nullableStr(value.start_time),
     end_time: nullableStr(value.end_time),
     break_minutes: nullableNum(value.break_minutes),
+    // null здесь и в отсутствующем поле, и во всяком другом мусоре — как и у
+    // break_minutes. Всюду в расчёте (duration.ts) null и 0 означают одно и то
+    // же («перерыв целиком неоплачиваемый»), поэтому файл, записанный до
+    // появления этого поля, читается корректно без отдельного значения по
+    // умолчанию, а собственный экспорт приложения переживает разбор один в один.
+    paid_break_minutes: nullableNum(value.paid_break_minutes),
     // По умолчанию TRUE, а не false, и ровно по той же причине, что в
     // миграции version(8): в файле, записанном версией до раздела 6.1, ни одно
     // hours не выводилось из времён. Значение false включило бы вывод для
