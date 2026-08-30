@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { AuthAccount } from "@/lib/sync/auth";
 import type { DataSummary } from "@/db/account";
 import type { BackupFile } from "@/lib/export/backup";
+import { isCloudConfigured } from "@/lib/sync/auth";
 
 /**
  * Состояние облака человеческими словами — ровно то, что экран аккаунта
@@ -45,7 +46,10 @@ interface SyncState {
 }
 
 export const useSyncStore = create<SyncState>((set) => ({
-  phase: "disabled",
+  // Не "disabled" по умолчанию: сессия восстанавливается асинхронно, и вкладка
+  // «Ещё» на холодном старте успела бы сказать «облака в сборке нет» там, где
+  // оно есть. На скриншоте с телефона это неотличимо от настоящей поломки.
+  phase: isCloudConfigured() ? "signed_out" : "disabled",
   account: null,
   lastSyncAt: null,
   lastError: null,

@@ -225,6 +225,17 @@ describe("syncOnce", () => {
     expect(await db.day_types.get("dt-night")).toBeDefined();
   });
 
+  it("строка с нечитаемой отметкой времени всё равно уезжает в облако", async () => {
+    const cloud = new FakeCloud();
+    await db.holidays.put(makeHoliday({ id: "h-ok", updated_at: "2026-08-30T09:00:00.000Z" }));
+    await syncOnce(db, USER_ID, cloud);
+
+    await db.holidays.put(makeHoliday({ id: "h-broken", updated_at: "не дата" }));
+    await syncOnce(db, USER_ID, cloud);
+
+    expect(cloud.row("holidays", "h-broken")).toBeDefined();
+  });
+
   it("строка настроек получает облачный идентификатор: два устройства не плодят вторую", async () => {
     const cloud = new FakeCloud();
     await db.settings.put(makeSettings({ id: "s-local-random", default_base_rate: 33.75 }));

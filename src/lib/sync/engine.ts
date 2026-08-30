@@ -205,7 +205,11 @@ async function pushTable(
     // Без этого условия выгрузка и докачка гоняли бы одни и те же строки по
     // кругу: каждая выгрузка поднимает серверную отметку выше курсора.
     if (justPulled.has(key)) return false;
-    return since === null || Date.parse(row.updated_at) >= since;
+    if (since === null) return true;
+    const at = Date.parse(row.updated_at);
+    // Нечитаемая отметка времени — не повод не выгружать строку: она не
+    // сравнима ни с чем, и молча оставить её на телефоне значит потерять.
+    return Number.isNaN(at) || at >= since;
   });
   if (candidates.length === 0) return;
 
