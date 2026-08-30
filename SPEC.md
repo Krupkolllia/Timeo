@@ -497,11 +497,13 @@ the calculation layer and every stored row, for no gain the user can see.
     Supabase sends the person to the Site URL — the calendar — and the code has to disappear from the
     address there too.
 
-  - **A return that lands in Safari signs the person in inside Safari, and the home-screen app stays
-    signed out.** A home-screen web app and Safari do not share storage, and nothing in a PWA can
-    force the return back into the icon. The app cannot repair this; it says so in words next to the
-    button and asks for another attempt from the icon. Nothing is lost either way — the local database
-    is untouched by a failed sign-in.
+  - **A return that lands in Safari completes nowhere.** A home-screen web app and Safari do not share
+    storage, so the verifier that the sign-in wrote stays in the app and Safari cannot exchange the
+    code: Safari's copy of the app shows the refusal, and the home-screen app, which never saw the
+    return at all, is still signed out. That is the intended shape of the failure rather than a
+    session left in the wrong place, which is what implicit would have produced. Nothing is lost —
+    a failed sign-in touches no local row — and the only way forward is another attempt from the
+    icon.
 
   - **Whether one address used both with a password and with Google is one account or two is decided
     by the Supabase project, not by this app.** If the project links them, the second sign-in returns
