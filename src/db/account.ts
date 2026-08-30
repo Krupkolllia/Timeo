@@ -34,7 +34,11 @@ function countMonthsWithMoney(periods: Period[], entries: Entry[]): number {
   for (const period of periods) {
     if (period.deleted_at !== null) continue;
     const closed = period.closed_totals;
-    if (period.extra_amount !== 0 || (closed && closed.amount !== 0)) months.add(`${period.year}:${period.month}`);
+    // Ключ ровно того же вида, что у записи ниже ("2026-07"): две разные формы
+    // одного и того же месяца посчитали бы его дважды.
+    if (period.extra_amount !== 0 || (closed && closed.amount !== 0)) {
+      months.add(`${period.year}-${String(period.month).padStart(2, "0")}`);
+    }
   }
   for (const entry of entries) {
     if (entry.deleted_at !== null || entry.amount === 0) continue;

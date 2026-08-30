@@ -24,15 +24,12 @@ export function createSupabaseGateway(client: SupabaseClient, restUrl: string, a
     },
 
     async pull(table: SyncTable, userId: string, since: string | null, limit: number): Promise<PullPage> {
-      let query = client
-        .from(table)
-        .select("*")
-        .eq("user_id", userId)
-        .order("server_updated_at", { ascending: true })
-        .limit(limit);
-      if (since) query = query.gt("server_updated_at", since);
+      // Фильтры — до order/limit: PostgREST-строитель после них отдаёт другой
+      // объект, у которого методов сравнения уже нет.
+      let filter = client.from(table).select("*").eq("user_id", userId);
+      if (since) filter = filter.gt("server_updated_at", since);
 
-      const { data, error } = await query;
+      const { data, error } = await filter.order("server_updated_at", { ascending: true }).limit(limit);
       if (error) throw new Error(error.message);
 
       const rows = (data ?? []) as RemoteRow[];
