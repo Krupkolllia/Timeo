@@ -49,6 +49,7 @@ export function AccountPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false);
   const [eraseUnderstood, setEraseUnderstood] = useState(false);
@@ -78,6 +79,11 @@ export function AccountPage() {
       }
       setPassword("");
       await handleAccountChange(db, cloudGateway, result.account, __APP_VERSION__);
+    } catch (error) {
+      // Исключение (а не отказ) — тоже исход, и молча заканчиваться он не имеет
+      // права: на скриншоте с телефона «ничего не произошло» неотличимо от
+      // сломанной сборки (раздел 12).
+      setFieldError(`${ru.account.errorUnknown} ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -86,8 +92,11 @@ export function AccountPage() {
   async function withBusy(action: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
+    setActionError(null);
     try {
       await action();
+    } catch (error) {
+      setActionError(`${ru.account.errorUnknown} ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -105,6 +114,12 @@ export function AccountPage() {
         </button>
         <span className="min-w-0 truncate text-lg font-semibold tracking-tight">{ru.account.title}</span>
       </header>
+
+      {actionError && (
+        <p className="shrink-0 px-4 pb-2 text-xs text-app-fg/70" role="status">
+          {actionError}
+        </p>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
         {phase === "disabled" && (

@@ -166,6 +166,31 @@ describe("вход другим пользователем", () => {
     expect(await db.day_types.where("user_id").equals(OTHER.userId).count()).toBeGreaterThan(0);
   });
 
+  it("инвариант 44: предупреждение считает и то, что осталось под анонимным идентификатором", async () => {
+    await seedLocalWork(LOCAL_ID);
+    const cloud = new FakeCloud();
+    // Вошли, поработали ещё, и часть строк осталась под старым анонимным id —
+    // так выглядит база, где localStorage чистился отдельно от IndexedDB.
+    localStorage.setItem("timeo:cloud-user-id", ACCOUNT.userId);
+    await db.entries.put(makeEntry({ id: "e-cloud-user", user_id: ACCOUNT.userId, date: "2026-09-02", amount: 271.53 }));
+
+    await handleAccountChange(db, cloud, OTHER, "test");
+
+    const warning = useSyncStore.getState().differentUser;
+    expect(warning?.local.entries).toBe(2);
+    expect(warning?.local.months_with_money).toBe(2);
+  });
+
+  it("пустую базу вход другим аккаунтом не заставляет подтверждать стирание", async () => {
+    const cloud = new FakeCloud();
+    localStorage.setItem("timeo:cloud-user-id", ACCOUNT.userId);
+
+    await handleAccountChange(db, cloud, OTHER, "test");
+
+    expect(useSyncStore.getState().phase).toBe("idle");
+    expect(localStorage.getItem("timeo:cloud-user-id")).toBe(OTHER.userId);
+  });
+
   it("синхронизация не идёт, пока висит вопрос или предупреждение", async () => {
     await seedLocalWork(LOCAL_ID);
     const cloud = new FakeCloud();

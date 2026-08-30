@@ -1,6 +1,8 @@
 import type { TimeoDB } from "@/db/schema";
 import {
   adoptAccount,
+  isEmptySummary,
+  summarizeAllLocalData,
   fetchCloudSnapshot,
   summarizeBackup,
   summarizeLocalData,
@@ -112,15 +114,32 @@ async function accountChanged(
   }
 
   if (known && known !== account.userId) {
-    store.set({
-      phase: "different_user",
-      account,
-      differentUser: { account, local: await summarizeLocalData(db, known) },
-    });
+    // Считаем ВСЮ базу, а не только строки прошлого аккаунта: стирание уносит
+    // и то, что осталось под анонимным идентификатором.
+    const local = await summarizeAllLocalData(db);
+    if (isEmptySummary(local)) {
+      // Стирать нечего — предупреждать не о чем: инвариант 44 защищает данные,
+      // а не требует вопроса там, где ответ ничего не меняет. Базу всё равно
+      // чистим: в ней могли остаться мягко удалённые строки прошлого аккаунта,
+      // которые новому не принадлежат и не видны ни одному запросу.
+      await wipeLocalData(db);
+      await finishAdoptionFromCloud(db, gateway, account, appVersion);
+      return;
+    }
+    store.set({ phase: "different_user", account, differentUser: { account, local } });
     return;
   }
 
-  // Первый вход на этом устройстве.
+  await finishAdoptionFromCloud(db, gateway, account, appVersion);
+}
+
+/** Первый вход на этом устройстве: решаем, спрашивать ли, и если нет — переезжаем. */
+async function finishAdoptionFromCloud(
+  db: TimeoDB,
+  gateway: CloudGateway,
+  account: AuthAccount,
+  appVersion: string,
+): Promise<void> {
   const localUserId = getLocalUserId();
   const local = await summarizeLocalData(db, localUserId);
   const snapshot = await fetchCloudSnapshot(gateway, account.userId, appVersion);
@@ -128,7 +147,7 @@ async function accountChanged(
 
   if (isMeaningful(local) && isMeaningful(cloud)) {
     // Преамбула раздела 5 и инвариант 47: молчаливого слияния не бывает.
-    store.set({ phase: "choice_required", account, choice: { account, snapshot, cloud, local } });
+    useSyncStore.getState().set({ phase: "choice_required", account, choice: { account, snapshot, cloud, local } });
     return;
   }
 

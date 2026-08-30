@@ -87,6 +87,18 @@ describe("AccountPage — вход", () => {
     expect(screen.getByRole("button", { name: ru.account.signIn })).toBeEnabled();
   });
 
+  it("инвариант 58: упавший вход не оставляет экран без объяснения", async () => {
+    signInMock.mockRejectedValue(new Error("TypeError: Failed to fetch"));
+    renderAccount();
+
+    fireEvent.change(screen.getByLabelText(ru.account.email), { target: { value: "test@example.com" } });
+    fireEvent.change(screen.getByLabelText(ru.account.password), { target: { value: "пароль" } });
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signIn }));
+
+    expect(await screen.findByText(/Failed to fetch/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: ru.account.signIn })).toBeEnabled();
+  });
+
   it("пустая почта не уходит в сеть вовсе", () => {
     renderAccount();
 

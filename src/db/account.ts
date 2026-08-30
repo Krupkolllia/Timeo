@@ -49,6 +49,22 @@ function countMonthsWithMoney(periods: Period[], entries: Entry[]): number {
   return months.size;
 }
 
+/**
+ * То же самое, но по ВСЕЙ базе, без разбора владельца. Предупреждение перед
+ * стиранием (инвариант 44) обязано называть всё, что исчезнет: строки могли
+ * остаться и под анонимным идентификатором — localStorage чистится отдельно от
+ * IndexedDB, и такой след уже описан в db/backup.ts.
+ */
+export async function summarizeAllLocalData(db: TimeoDB): Promise<DataSummary> {
+  const [periods, day_types, entries, holidays] = await Promise.all([
+    db.periods.toArray(),
+    db.day_types.toArray(),
+    db.entries.toArray(),
+    db.holidays.toArray(),
+  ]);
+  return summarize(periods, day_types, entries, holidays);
+}
+
 export async function summarizeLocalData(db: TimeoDB, userId: string): Promise<DataSummary> {
   const [periods, day_types, entries, holidays] = await Promise.all([
     db.periods.where("user_id").equals(userId).toArray(),
@@ -57,6 +73,10 @@ export async function summarizeLocalData(db: TimeoDB, userId: string): Promise<D
     db.holidays.where("user_id").equals(userId).toArray(),
   ]);
 
+  return summarize(periods, day_types, entries, holidays);
+}
+
+function summarize(periods: Period[], day_types: DayType[], entries: Entry[], holidays: Holiday[]): DataSummary {
   const alive = <T extends BaseRecord>(rows: T[]): T[] => rows.filter((row) => row.deleted_at === null);
 
   return {
