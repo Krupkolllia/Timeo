@@ -17,6 +17,10 @@ type PresetDayType = Pick<
   | "counts_as_work"
   | "counts_toward_norm"
   | "default_hours"
+  | "default_start"
+  | "default_end"
+  | "default_break_minutes"
+  | "default_break_paid_minutes"
   | "default_multiplier"
   | "default_rate"
   | "ignore_auto_multipliers"
@@ -37,6 +41,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: true,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: false,
@@ -53,6 +61,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: true,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1.5,
     default_rate: null,
     ignore_auto_multipliers: false,
@@ -69,6 +81,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: false,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: true,
@@ -85,6 +101,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: false,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: true,
@@ -101,6 +121,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: false,
     counts_toward_norm: false,
     default_hours: 0,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: true,
@@ -117,6 +141,10 @@ export const PRESET_DAY_TYPES: PresetDayType[] = [
     counts_as_work: false,
     counts_toward_norm: false,
     default_hours: 0,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: false,

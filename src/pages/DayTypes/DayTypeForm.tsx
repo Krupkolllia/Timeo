@@ -219,6 +219,61 @@ export function DayTypeForm({
           />
         </div>
 
+        {/* Раздел 5.3: времена смены по умолчанию. Заданы оба — часы по
+            умолчанию выводятся из них (раздел 6.1) вместо поля выше; хотя бы
+            одного нет — работает "Часы по умолчанию" как и раньше. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-white/50" htmlFor="day-type-default-start">
+              {ru.dayTypes.defaultStartTime}
+            </label>
+            <input
+              id="day-type-default-start"
+              type="time"
+              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              value={draft.default_start ?? ""}
+              onChange={(event) => patch({ default_start: event.target.value || null })}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-white/50" htmlFor="day-type-default-end">
+              {ru.dayTypes.defaultEndTime}
+            </label>
+            <input
+              id="day-type-default-end"
+              type="time"
+              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3"
+              value={draft.default_end ?? ""}
+              onChange={(event) => patch({ default_end: event.target.value || null })}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-white/50" htmlFor="day-type-default-break">
+              {ru.dayTypes.defaultBreakMinutes}
+            </label>
+            <NumberInput
+              id="day-type-default-break"
+              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg"
+              value={draft.default_break_minutes ?? 0}
+              onChange={(value) => patch({ default_break_minutes: value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-white/50" htmlFor="day-type-default-break-paid">
+              {ru.dayTypes.defaultBreakPaidMinutes}
+            </label>
+            <NumberInput
+              id="day-type-default-break-paid"
+              className="mt-1 w-full rounded-lg bg-white/5 px-2 py-3 text-lg"
+              value={draft.default_break_paid_minutes ?? 0}
+              onChange={(value) => patch({ default_break_paid_minutes: value })}
+            />
+          </div>
+        </div>
+        <p className="-mt-2 text-xs text-white/40">{ru.dayTypes.defaultTimesHint}</p>
+
         {/* Замок — отдельный осознанный переключатель, а не побочный эффект
             ввода в поле ставки (раздел 5.3.1). */}
         <Toggle
