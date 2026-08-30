@@ -14,6 +14,8 @@ export class FakeCloud implements CloudGateway {
   private clock: number;
   /** Сообщение ближайшей неудачи выгрузки — как оборванная сеть посреди отправки. */
   failNextPush: string | null = null;
+  /** Уронить выгрузку не на первой порции, а на N-й: обрыв связи посередине. */
+  failPushAfterChunks: number | null = null;
   failNextPull: string | null = null;
   pushedChunks: { table: SyncTable; ids: string[] }[] = [];
 
@@ -63,6 +65,13 @@ export class FakeCloud implements CloudGateway {
   }
 
   push(table: SyncTable, rows: BaseRecord[]): Promise<void> {
+    if (this.failPushAfterChunks !== null) {
+      if (this.failPushAfterChunks === 0) {
+        this.failPushAfterChunks = null;
+        return Promise.reject(new Error("связь оборвалась посреди выгрузки"));
+      }
+      this.failPushAfterChunks -= 1;
+    }
     if (this.failNextPush) {
       const message = this.failNextPush;
       this.failNextPush = null;

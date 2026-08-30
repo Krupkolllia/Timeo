@@ -172,6 +172,59 @@ describe("syncOnce", () => {
     expect(second.pushed).toBe(0);
   });
 
+  it("инвариант 43: упавшая вторая порция не оставляет невыгруженных строк навсегда", async () => {
+    const cloud = new FakeCloud();
+    // 250 строк, у которых порядок ключей ОБРАТЕН порядку правок: h-000 правили
+    // последним. Порции нарезаются по 200, и знак выгрузки, поставленный по
+    // первой порции, перепрыгнул бы через оставшиеся 50, будь порядок ключевым.
+    const rows = Array.from({ length: 250 }, (_, i) =>
+      makeHoliday({
+        id: `h-${String(i).padStart(3, "0")}`,
+        date: "2026-08-10",
+        updated_at: new Date(Date.parse("2026-08-30T09:00:00.000Z") - i * 1000).toISOString(),
+      }),
+    );
+    await db.holidays.bulkPut(rows);
+
+    // Первая порция уходит, вторая падает.
+    cloud.failPushAfterChunks = 1;
+    await expect(syncOnce(db, USER_ID, cloud)).rejects.toThrow();
+    await syncOnce(db, USER_ID, cloud);
+    await syncOnce(db, USER_ID, cloud);
+
+    expect(cloud.rows("holidays")).toHaveLength(250);
+  });
+
+  it("инвариант 37: застрявшая докачка записей расталкивает себя сама", async () => {
+    const cloud = new FakeCloud();
+    cloud.seed("day_types", [makeDayType({ id: "dt-night" })], "2026-08-30T09:00:00.000Z");
+    cloud.seed(
+      "entries",
+      [makeEntry({ id: "e-night", day_type_id: "dt-night", amount: 412.81 })],
+      "2026-08-30T09:30:00.000Z",
+    );
+    // Курсор типов дня уже за их строкой, а самого типа в базе нет: так
+    // выглядит устройство, чью базу очистили после докачки. Без сброса курсора
+    // запись ждала бы тип, который никогда не приедет.
+    await db.sync_meta.put({
+      user_id: USER_ID,
+      pull_cursor: { day_types: "2026-08-30T09:10:00.000Z" },
+      pushed_through: {},
+      clock_guard: 0,
+      last_sync_at: null,
+      last_error: null,
+    });
+
+    const first = await syncOnce(db, USER_ID, cloud);
+    expect(first.deferred).toBe(1);
+
+    const second = await syncOnce(db, USER_ID, cloud);
+
+    expect(second.deferred).toBe(0);
+    expect((await db.entries.get("e-night"))?.amount).toBe(412.81);
+    expect(await db.day_types.get("dt-night")).toBeDefined();
+  });
+
   it("строка настроек получает облачный идентификатор: два устройства не плодят вторую", async () => {
     const cloud = new FakeCloud();
     await db.settings.put(makeSettings({ id: "s-local-random", default_base_rate: 33.75 }));

@@ -19,6 +19,20 @@ import { useSyncStore } from "@/store/syncStore";
 import type { BackupFile } from "@/lib/export/backup";
 
 /**
+ * Очередь из одной операции. Восстановленная сессия и событие onAuthStateChange
+ * приходят почти одновременно, а таймер переднего плана — поверх них; два
+ * первых входа подряд означали бы два переезда данных сразу.
+ */
+let queue: Promise<void> = Promise.resolve();
+
+function serialize(work: () => Promise<void>): Promise<void> {
+  const next = queue.then(work, work);
+  // Ошибка не должна оборвать очередь: следующий вызов обязан выполниться.
+  queue = next.catch(() => {});
+  return next;
+}
+
+/**
  * «Значимые» данные — периоды и записи, то есть то, чего человек не получит
  * заново сам собой. Типы дня, настройки и праздники создаются посевом при
  * первом запуске на любом устройстве, и спрашивать «что оставить» из-за них
@@ -51,14 +65,23 @@ async function finishAdoption(
   // не было вовсе) — приложение без них не работает.
   await bootstrapUser(db, account.userId);
   useSyncStore.getState().set({ choice: null, phase: "idle", account });
-  await runSync(db, gateway);
+  await syncNow(db, gateway);
 }
 
 /**
  * Что делать с вошедшим (или вышедшим) аккаунтом. Единственное место, где
  * принимается решение «это тот же человек, другой человек или первый вход».
  */
-export async function handleAccountChange(
+export function handleAccountChange(
+  db: TimeoDB,
+  gateway: CloudGateway | null,
+  account: AuthAccount | null,
+  appVersion: string,
+): Promise<void> {
+  return serialize(() => accountChanged(db, gateway, account, appVersion));
+}
+
+async function accountChanged(
   db: TimeoDB,
   gateway: CloudGateway | null,
   account: AuthAccount | null,
@@ -84,7 +107,7 @@ export async function handleAccountChange(
   if (known === account.userId) {
     const meta = await readSyncMeta(db, account.userId);
     store.set({ phase: "idle", account, lastSyncAt: meta.last_sync_at, lastError: meta.last_error });
-    await runSync(db, gateway);
+    await syncNow(db, gateway);
     return;
   }
 
@@ -120,10 +143,12 @@ export async function handleAccountChange(
 }
 
 /** Ответ человека на вопрос первого входа. */
-export async function completeFirstSignIn(db: TimeoDB, gateway: CloudGateway, mode: ImportMode): Promise<void> {
-  const { choice } = useSyncStore.getState();
-  if (!choice) return;
-  await finishAdoption(db, gateway, choice.account, choice.snapshot, mode);
+export function completeFirstSignIn(db: TimeoDB, gateway: CloudGateway, mode: ImportMode): Promise<void> {
+  return serialize(async () => {
+    const { choice } = useSyncStore.getState();
+    if (!choice) return;
+    await finishAdoption(db, gateway, choice.account, choice.snapshot, mode);
+  });
 }
 
 /**
@@ -131,16 +156,18 @@ export async function completeFirstSignIn(db: TimeoDB, gateway: CloudGateway, mo
  * стирается целиком, и только здесь — экран до этого показал числами, что
  * именно исчезнет.
  */
-export async function confirmDifferentUser(db: TimeoDB, gateway: CloudGateway, appVersion: string): Promise<void> {
-  const { differentUser } = useSyncStore.getState();
-  if (!differentUser) return;
+export function confirmDifferentUser(db: TimeoDB, gateway: CloudGateway, appVersion: string): Promise<void> {
+  return serialize(async () => {
+    const { differentUser } = useSyncStore.getState();
+    if (!differentUser) return;
 
-  await wipeLocalData(db);
-  setCloudUserId(differentUser.account.userId);
-  refreshActiveUserId();
-  await bootstrapUser(db, differentUser.account.userId);
-  useSyncStore.getState().set({ differentUser: null, phase: "idle" });
-  await handleAccountChange(db, gateway, differentUser.account, appVersion);
+    await wipeLocalData(db);
+    setCloudUserId(differentUser.account.userId);
+    refreshActiveUserId();
+    await bootstrapUser(db, differentUser.account.userId);
+    useSyncStore.getState().set({ differentUser: null, phase: "idle" });
+    await accountChanged(db, gateway, differentUser.account, appVersion);
+  });
 }
 
 /**
@@ -148,7 +175,11 @@ export async function confirmDifferentUser(db: TimeoDB, gateway: CloudGateway, a
  * ошибка оседает в состоянии и на экране аккаунта, а не в спиннере поверх
  * календаря.
  */
-export async function runSync(db: TimeoDB, gateway: CloudGateway | null): Promise<void> {
+export function runSync(db: TimeoDB, gateway: CloudGateway | null): Promise<void> {
+  return serialize(() => syncNow(db, gateway));
+}
+
+async function syncNow(db: TimeoDB, gateway: CloudGateway | null): Promise<void> {
   const store = useSyncStore.getState();
   const { phase, account } = store;
   if (!gateway || !account) return;

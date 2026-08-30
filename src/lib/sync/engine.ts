@@ -163,6 +163,14 @@ async function pullTable(
       if (!result.deferredIds.has(row.id) && !result.forcePush.includes(row.id)) justPulled.add(`${table}:${row.id}`);
     }
 
+    if (result.deferredIds.size > 0) {
+      // Запись ждёт типа дня, которого здесь нет. Курсор дальше неё не идёт
+      // (иначе она пропала бы навсегда), поэтому докачка записей встала бы
+      // насмерть, если тип уже проехал мимо курсора типов. Сбрасываем курсор
+      // типов дня: их единицы, и следующий проход перечитает их все.
+      meta.pull_cursor.day_types = undefined;
+    }
+
     const next = advanceCursor(page.rows, result.deferredIds, cursor);
     // Курсор не сдвинулся — страница целиком отложена, и повторный запрос
     // вернул бы её же. Выходим: она приедет на следующем проходе, когда типы
@@ -204,8 +212,15 @@ async function pushTable(
   // Часы вперёд чинятся ДО выгрузки и локально тоже: иначе строка с датой из
   // будущего выигрывала бы каждый конфликт, пока это будущее не наступит
   // (инвариант 42).
-  const clamped = candidates.map((row) => clampFutureUpdatedAt(row, serverNow));
-  const repaired = clamped.filter((row, index) => row !== candidates[index]);
+  // По возрастанию updated_at, а не в порядке ключей Dexie. Знак выгрузки —
+  // это «докуда подтверждено», и если первая порция унесёт самую свежую
+  // строку, а вторая упадёт, знак перепрыгнет через невыгруженные: в отбор они
+  // не попали бы уже никогда. Инвариант 43 — ровно про это.
+  const ordered = [...candidates].sort((a, b) =>
+    a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : 0,
+  );
+  const clamped = ordered.map((row) => clampFutureUpdatedAt(row, serverNow));
+  const repaired = clamped.filter((row, index) => row !== ordered[index]);
   if (repaired.length) {
     await (tableOf(db, table) as unknown as { bulkPut: (rows: AnyRow[]) => Promise<unknown> }).bulkPut(repaired);
   }
