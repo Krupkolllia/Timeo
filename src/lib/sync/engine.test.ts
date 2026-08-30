@@ -157,6 +157,21 @@ describe("syncOnce", () => {
     expect(second.pulled).toBe(0);
   });
 
+  it("собственная выгрузка не возвращается обратно как чужая правка", async () => {
+    const cloud = new FakeCloud();
+    await db.holidays.put(makeHoliday({ id: "h-1", updated_at: "2026-08-30T09:00:00.000Z" }));
+
+    const first = await syncOnce(db, USER_ID, cloud);
+    expect(first.pushed).toBe(1);
+
+    // Выгрузка подняла серверную отметку выше курсора докачки, и на следующем
+    // проходе строка приезжает обратно. Она в точности та же самая — принимать
+    // и показывать это как изменение нельзя.
+    const second = await syncOnce(db, USER_ID, cloud);
+    expect(second.pulled).toBe(0);
+    expect(second.pushed).toBe(0);
+  });
+
   it("строка настроек получает облачный идентификатор: два устройства не плодят вторую", async () => {
     const cloud = new FakeCloud();
     await db.settings.put(makeSettings({ id: "s-local-random", default_base_rate: 33.75 }));
