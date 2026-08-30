@@ -1,15 +1,30 @@
 import { useEffect } from "react";
 import { db } from "@/db/db";
-import { currentAccount, onAuthChange } from "@/lib/sync/auth";
+import { completeOAuthReturn, currentAccount, onAuthChange } from "@/lib/sync/auth";
 import { cloudGateway } from "@/lib/sync/cloud";
 import { handleAccountChange, runSync } from "@/lib/sync/controller";
+import { useSyncStore } from "@/store/syncStore";
 
 /** Как часто приложение на переднем плане проверяет, не появилось ли что выгрузить. */
 export const FOREGROUND_SYNC_INTERVAL_MS = 60_000;
 
 /**
- * Фоновая жизнь облака: восстановленная сессия, вход и выход, возврат в
- * приложение, появление сети.
+ * Разбор возврата не имеет права оборвать запуск облака: что бы ни случилось с
+ * адресом, сессию всё равно спрашиваем и синхронизацию всё равно заводим.
+ */
+async function settleOAuthReturn(): Promise<void> {
+  try {
+    const returned = await completeOAuthReturn();
+    if (returned.kind === "none") return;
+    useSyncStore.getState().set({ signInError: returned.kind === "failed" ? returned.code : null });
+  } catch {
+    useSyncStore.getState().set({ signInError: "oauth_failed" });
+  }
+}
+
+/**
+ * Фоновая жизнь облака: возврат от провайдера, восстановленная сессия, вход и
+ * выход, возврат в приложение, появление сети.
  *
  * Ни одно из этих событий не задерживает отрисовку: хук ничего не возвращает,
  * экраны читают Dexie и не знают о нём вовсе (инварианты 39 и 40).
@@ -19,6 +34,11 @@ export function useCloudSession(): void {
     let cancelled = false;
 
     void (async () => {
+      // Возврат от провайдера разбирается до вопроса о сессии: обмен кода её и
+      // создаёт. Разбор происходит на любом адресе — если Redirect URLs в
+      // Supabase окажутся неполными, человек вернётся на календарь, и код
+      // обязан исчезнуть из адреса там же.
+      await settleOAuthReturn();
       const account = await currentAccount();
       if (!cancelled) await handleAccountChange(db, cloudGateway, account, __APP_VERSION__);
     })();

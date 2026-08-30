@@ -33,7 +33,11 @@ Only the `anon` key belongs here; `service_role` must never reach the client.
 In Cloudflare they must be set as **build** variables in Workers Builds, not as runtime worker
 secrets: Vite inlines `VITE_*` when the bundle is built, so a runtime secret never reaches it.
 The Supabase project also needs the production domain and `http://localhost:5173/**` in
-Authentication → URL Configuration, and the SQL in `supabase/sql/` run once by hand.
+Authentication → URL Configuration, and the SQL in `supabase/sql/` run once by hand. Google
+sign-in (block 8.1) adds no variable here: its Client ID and Secret live in the Supabase console
+only — see `supabase/sql/README.md`. Without the app's own return address in the Redirect URLs
+list, Supabase sends the person to the Site URL instead, which looks like a sign-in that did
+nothing.
 
 ## Scripts
 

@@ -11,9 +11,15 @@ Each file is idempotent and can be re-run safely.
 
 What the project needs besides these files (Supabase console, done by hand):
 
-- **Authentication → Providers**: e-mail enabled. Google is deferred to its own piece of work.
-- **Authentication → URL Configuration**: Site URL = the production domain; Redirect URLs also list
-  `http://localhost:5173/**` for local development.
+- **Authentication → Providers**: e-mail and Google enabled. Google needs a Client ID and Client Secret
+  from an OAuth client of type "Web application" in Google Cloud, whose Authorized redirect URI is
+  `https://<project-ref>.supabase.co/auth/v1/callback`. The secret lives in the Supabase console only
+  and never in this repository. If the Google consent screen is still in "Testing", only accounts
+  listed there as test users can sign in.
+- **Authentication → URL Configuration**: Site URL = `https://timeo.timeo-app.workers.dev`; Redirect
+  URLs list `https://timeo.timeo-app.workers.dev/**` and `http://localhost:5173/**` for local
+  development. Without the app's own return address in that list Supabase silently sends the person to
+  the Site URL instead, which looks like a sign-in that did nothing.
 - **Cloudflare Workers Builds**: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set as *build*
   variables. Vite inlines them at build time; a runtime worker secret never reaches the bundle.
 - Only the `anon` key ever reaches the client. `service_role` must not appear in the app or the repo.

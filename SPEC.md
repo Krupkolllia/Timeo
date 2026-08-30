@@ -89,9 +89,21 @@ last-write-wins on `updated_at`; a timestamp more than a day ahead of the server
 time on the way up, so a fast clock cannot win every conflict until that future arrives. Push
 watermarks advance only on the server's acknowledgement, so a failed sync retries and loses nothing.
 
-Sign-in is email and password. Google sign-in is deferred to its own piece of work: the OAuth round
-trip leaves a standalone home-screen PWA on iOS and comes back in Safari, which needs a device check
-of its own and must not be mixed with the first release of sync.
+Sign-in is e-mail and password (block 8) or Google (block 8.1). The Google round trip runs on the
+PKCE flow, pinned explicitly rather than left at the library's default of implicit: on iOS the return
+from the provider may land in Safari instead of in the home-screen icon, and implicit would hand that
+other context a working session with the tokens in the address bar. With PKCE the address carries only
+a one-time code, and only the context that started the sign-in holds the verifier that can exchange
+it. The app parses the return itself rather than letting supabase-js do it silently: the address is
+cleaned with `replaceState` before the exchange, so neither a code nor a token survives in the address
+bar or in the history entry behind the back button, and a refusal — a cancelled consent screen, a
+return that cannot be completed — reaches the account screen in Russian words, never as the provider's
+English message.
+
+Google is only another way to obtain an account, not a second way to sign in for the first time: the
+session it produces goes into the same path as the password sign-in, so the `user_id` migration, the
+"what to keep" question and the different-account warning are one piece of code with one set of
+tests.
 
 **Hosting.** Cloudflare Workers with Static Assets, deployed from a private GitHub repository via
 Workers Builds. Not Cloudflare Pages: the same Worker later hosts the push sender and the keep-alive
@@ -467,6 +479,39 @@ the calculation layer and every stored row, for no gain the user can see.
     which is the point — so a cheap timer is the price of that independence. There is no realtime
     subscription.
 
+  Block 8.1 (Google sign-in) added these:
+
+  - **The flow is PKCE, pinned in the client, and `detectSessionInUrl` is off.** supabase-js defaults
+    to implicit, which returns the tokens themselves in the address. On iOS the return can land in
+    Safari rather than in the home-screen app, and implicit would leave a working session and its
+    tokens in that other context's address bar, tab and history. PKCE returns a one-time code that
+    only the context holding the verifier can exchange, so the same misdirected return produces
+    nothing instead of a live session in the wrong place. Automatic URL detection is off because the
+    app cleans the address and reports the failure itself, and neither can be tested when the library
+    does it silently.
+
+  - **The return goes to `/more/account`, and no callback route exists.** That screen is where the
+    button was pressed and where all four outcomes already live (signed in, refused, the "what to
+    keep" question, the different-account warning). The parsing itself happens at app start, on
+    whatever address the app opens on: if the Redirect URLs list in Supabase is ever incomplete,
+    Supabase sends the person to the Site URL — the calendar — and the code has to disappear from the
+    address there too.
+
+  - **A return that lands in Safari completes nowhere.** A home-screen web app and Safari do not share
+    storage, so the verifier that the sign-in wrote stays in the app and Safari cannot exchange the
+    code: Safari's copy of the app shows the refusal, and the home-screen app, which never saw the
+    return at all, is still signed out. That is the intended shape of the failure rather than a
+    session left in the wrong place, which is what implicit would have produced. Nothing is lost —
+    a failed sign-in touches no local row — and the only way forward is another attempt from the
+    icon.
+
+  - **Whether one address used both with a password and with Google is one account or two is decided
+    by the Supabase project, not by this app.** If the project links them, the second sign-in returns
+    the same `auth.uid` and nothing happens. If it does not, the `auth.uid` differs and the person
+    meets the different-account warning of invariant 44 — a warning with counts and a separate
+    confirmation, never a silent erase. The app deliberately does not try to guess which case it is
+    in, because both are handled by the same code.
+
 ### 5.5 `holidays`
 
 - `date`, `name`, `is_custom`
@@ -763,6 +808,17 @@ closed period — no adding, editing or deleting entries inside it — not wheth
 row may replicate from their other device. `closed_totals` travels with the row, so the frozen numbers
 are what arrives; nothing is recomputed on receipt.
 
+**What block 8.1 adds, and where it stops.** Google sign-in changes none of the guarantees above. It
+produces an account and hands it to the same code the password sign-in uses, so 44 and 47 hold through
+the same branches and are covered by tests that drive them from a Google return as well. Two limits are
+named rather than implied. A return from the provider that lands in Safari instead of in the
+home-screen app cannot sign that app in — storage is not shared, and no web application can force the
+return back into the icon; the app says so and stays usable, and the only recovery is to start the
+sign-in again from the icon. And the guarantee about the address — no code and no token left in the
+address bar or in the history entry — rests on `history.replaceState`, which is what the tests check;
+what a particular iOS version keeps in its own address bar afterwards can only be confirmed on the
+device.
+
 Two limits are worth naming rather than implying. The conflict is resolved on the client and the push
 is then a plain upsert, so an edit made on another device *between* this device's pull and its push is
 overwritten by the winner this device computed; the window is one sync cycle, and the loser's own next
@@ -921,8 +977,12 @@ version and hash shown large and selectable, since remote testing
 plain words (the signed-in address, "not signed in", or "this build has no cloud") and an entry to the
 account screen.
 
-**Account screen (8.4.2).** Signed out: e-mail and password, sign in and create account, and the error
-next to the fields — never a modal (invariants 54 and 58). Signed in: the address, when the last sync
+**Account screen (8.4.2).** Signed out: e-mail and password, sign in and create account, sign in with
+Google, and the error next to the fields or the button — never a modal (invariants 54 and 58). The
+Google button is present only in a build that has the cloud variables; without them the screen says the
+build has no cloud and offers no sign-in at all (invariant 39). A Google attempt that ends in a refusal
+— the consent screen cancelled, or a return that could not be completed — leaves its explanation under
+the button in Russian; the provider's own English message never reaches the screen. Signed in: the address, when the last sync
 happened or what went wrong, sync now, and sign out with a line saying plainly that nothing is deleted
 from the phone. Two more states live on the same screen: the first-sign-in question (both sides shown
 as counts, two modes, nothing preselected) and the different-account warning, which lists what would be
@@ -1015,7 +1075,11 @@ error boundary panel, deployment through Workers Builds.
 **Block 7 — settings.** Everything in 8.4.
 
 **Block 8 — cloud.** Supabase schema, RLS, e-mail sign-in, two-way sync, local data migration, the
-account screen. Google sign-in is carved out into its own piece of work (section 4).
+account screen.
+
+**Block 8.1 — Google sign-in.** The second sign-in method promised in section 3, carved out of block 8
+because the OAuth round trip leaves the app on iOS and its return is the most fragile point of the
+cloud (section 4, 5.4.1).
 
 **Block 9 — notifications and keep-alive.** Push subscription, the sender Worker, the cron ping.
 

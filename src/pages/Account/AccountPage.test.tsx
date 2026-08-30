@@ -8,7 +8,7 @@ import { useUserStore } from "@/store/userStore";
 import { FakeCloud } from "@/test/fakeCloud";
 import { makeDayType, makeEntry, makePeriod, makeSettings, resetDb } from "@/test/factories";
 import { ru } from "@/i18n/ru";
-import type { AuthResult } from "@/lib/sync/auth";
+import type { AuthResult, OAuthStart } from "@/lib/sync/auth";
 
 const LOCAL_ID = "local-anon-uuid";
 const ACCOUNT = { userId: "11111111-2222-3333-4444-555555555555", email: "test@example.com" };
@@ -16,6 +16,7 @@ const ACCOUNT = { userId: "11111111-2222-3333-4444-555555555555", email: "test@e
 const cloud = new FakeCloud();
 const signInMock = vi.fn<(email: string, password: string) => Promise<AuthResult>>();
 const signOutMock = vi.fn<() => Promise<void>>();
+const googleMock = vi.fn<(redirectTo: string) => Promise<OAuthStart>>();
 
 vi.mock("@/lib/sync/cloud", () => ({
   get cloudGateway() {
@@ -27,6 +28,7 @@ vi.mock("@/lib/sync/auth", () => ({
   signInWithPassword: (email: string, password: string) => signInMock(email, password),
   signUpWithPassword: (email: string, password: string) => signInMock(email, password),
   signOut: () => signOutMock(),
+  signInWithGoogle: (redirectTo: string) => googleMock(redirectTo),
   currentAccount: () => Promise.resolve(null),
   onAuthChange: () => () => {},
   isCloudConfigured: () => true,
@@ -65,9 +67,12 @@ beforeEach(async () => {
     lastError: null,
     choice: null,
     differentUser: null,
+    signInError: null,
     busy: false,
   });
   signInMock.mockReset();
+  googleMock.mockReset();
+  googleMock.mockResolvedValue({ ok: true });
   signOutMock.mockReset();
   signOutMock.mockResolvedValue(undefined);
 });
@@ -240,6 +245,79 @@ describe("AccountPage — вход другим пользователем", () 
   });
 });
 
+describe("AccountPage — вход через Google", () => {
+  it("уводит к провайдеру с адресом возврата этого же экрана и не трогает базу", async () => {
+    await db.settings.put(makeSettings({ id: "s-1", user_id: LOCAL_ID }));
+    await db.periods.put(makePeriod({ id: "p-open", user_id: LOCAL_ID, base_rate: 31.6 }));
+    await db.entries.put(makeEntry({ id: "e-open", user_id: LOCAL_ID, amount: 318.47 }));
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signInGoogle }));
+
+    await waitFor(() => expect(googleMock).toHaveBeenCalledWith(`${window.location.origin}/more/account`));
+    // Кнопка ничего не решает про данные: переезд начнётся только после возврата.
+    expect((await db.entries.get("e-open"))?.amount).toBe(318.47);
+    expect((await db.periods.get("p-open"))?.user_id).toBe(LOCAL_ID);
+    expect(localStorage.getItem("timeo:cloud-user-id")).toBeNull();
+  });
+
+  it("инвариант 54: отказ провайдера объясняется рядом с кнопкой, экран остаётся рабочим", async () => {
+    // Так это и приходит на экран: возврат разобран на запуске приложения,
+    // экран аккаунта открыт уже после.
+    useSyncStore.setState({ phase: "signed_out", signInError: "oauth_cancelled" });
+    renderAccount();
+
+    expect(screen.getByText(ru.account.errorOauthCancelled)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: ru.account.signInGoogle })).toBeEnabled();
+    expect(screen.getByLabelText(ru.account.email)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Новая попытка убирает прошлое сообщение, а не копит их.
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signInGoogle }));
+    await waitFor(() => expect(screen.queryByText(ru.account.errorOauthCancelled)).not.toBeInTheDocument());
+  });
+
+  it("английское сообщение провайдера на экран не попадает", async () => {
+    googleMock.mockResolvedValue({
+      ok: false,
+      code: "oauth_failed",
+      message: "Unsupported provider: provider is not enabled",
+    });
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signInGoogle }));
+
+    expect(await screen.findByText(ru.account.errorOauthFailed)).toBeInTheDocument();
+    expect(screen.queryByText(/Unsupported provider/)).not.toBeInTheDocument();
+  });
+
+  it("исключение вместо отказа тоже кончается словами, а не молчанием", async () => {
+    googleMock.mockRejectedValue(new Error("navigation blocked"));
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signInGoogle }));
+
+    expect(await screen.findByText(ru.account.errorOauthFailed)).toBeInTheDocument();
+    expect(screen.queryByText(/navigation blocked/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AccountPage — выход после неудачного входа через Google", () => {
+  it("старое сообщение о Google не встречает человека после выхода", async () => {
+    await db.settings.put(makeSettings({ id: "s-1", user_id: ACCOUNT.userId }));
+    localStorage.setItem("timeo:cloud-user-id", ACCOUNT.userId);
+    // Отказ провайдера мог случиться в другой вкладке, пока здесь была сессия:
+    // на экране он тогда не виден, но в состоянии лежит.
+    useSyncStore.setState({ phase: "idle", account: ACCOUNT, signInError: "oauth_cancelled" });
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.account.signOut }));
+
+    await screen.findByRole("button", { name: ru.account.signIn });
+    expect(screen.queryByText(ru.account.errorOauthCancelled)).not.toBeInTheDocument();
+  });
+});
+
 describe("AccountPage — сборка без облака", () => {
   it("инвариант 39: экран объясняет, что облака нет, и не предлагает войти", () => {
     useSyncStore.setState({ phase: "disabled", account: null });
@@ -247,5 +325,7 @@ describe("AccountPage — сборка без облака", () => {
 
     expect(screen.getByText(ru.account.disabledTitle)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: ru.account.signIn })).not.toBeInTheDocument();
+    // Кнопки Google нет вовсе: нажимать на неё было бы нечему.
+    expect(screen.queryByRole("button", { name: ru.account.signInGoogle })).not.toBeInTheDocument();
   });
 });
