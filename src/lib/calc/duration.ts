@@ -2,10 +2,17 @@
  * Раздел 6.1 ТЗ. Длительность смены выводится из начала, конца и перерыва.
  *
  *     if duration_is_manual:  duration = duration_minutes
- *     else if start и end:    raw = end − start
- *                             if raw <= 0: raw += 24ч      // смена через полночь
- *                             duration = raw − break_minutes
+ *     else if start и end:    total       = end − start
+ *                             if total <= 0: total += 24ч      // смена через полночь
+ *                             break       = break_minutes
+ *                             paid_break  = paid_break_minutes
+ *                             duration    = total − (break − paid_break)
  *     else:                   duration = default
+ *
+ * paid_break_minutes — новое понятие, которого не было в исходном ТЗ (согласовано
+ * отдельно): сколько минут перерыва оплачивается. 0 воспроизводит поведение до этой
+ * работы (перерыв целиком неоплачиваемый); значение, равное break, — перерыв
+ * оплачивается целиком; любое промежуточное — частично.
  *
  * Всё считается в ЦЕЛЫХ МИНУТАХ, а времена разбираются вручную. Построить два
  * Date и вычесть их — это ровно тот способ, которым ломается инвариант 27
@@ -42,8 +49,12 @@ export function parseTimeToMinutes(value: string | null | undefined): number | n
   return hours * 60 + minutes;
 }
 
+function roundedOrZero(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+}
+
 export interface DerivedDuration {
-  /** Длительность в целых минутах. Никогда не отрицательная (инвариант 30). */
+  /** Оплачиваемые (отработанные) минуты. Никогда не отрицательные (инвариант 30). */
   minutes: number;
   /**
    * Та же длительность в десятичных часах — в этом виде она лежит в записи
@@ -52,10 +63,14 @@ export interface DerivedDuration {
    * велит округлять ровно один раз и только на итоговой сумме за день.
    */
   hours: number;
+  /** Полное время смены (end − start, с поправкой на полночь), целые минуты. */
+  totalMinutes: number;
   /**
-   * Инвариант 30: перерыв длиннее смены даёт нулевую длительность и
-   * предупреждение — и всё равно сохраняется. Запрета здесь нет и быть не
-   * может (инвариант 54).
+   * Инвариант 30, обобщённый на оплачиваемый перерыв: НЕОПЛАЧИВАЕМАЯ часть
+   * перерыва длиннее смены, то есть total − (break − paid_break) < 0.
+   * При paid_break = 0 это в точности старое условие «перерыв длиннее смены».
+   * Даёт нулевую длительность и предупреждение, и всё равно сохраняется —
+   * запрета здесь нет и быть не может (инвариант 54).
    */
   break_exceeds_shift: boolean;
 }
@@ -69,6 +84,7 @@ export function deriveDurationFromTimes(
   startTime: string | null | undefined,
   endTime: string | null | undefined,
   breakMinutes: number | null | undefined,
+  paidBreakMinutes?: number | null | undefined,
 ): DerivedDuration | null {
   const start = parseTimeToMinutes(startTime);
   const end = parseTimeToMinutes(endTime);
@@ -78,20 +94,22 @@ export function deriveDurationFromTimes(
   // граничный случай, и он тоже про полные сутки: 08:00 → 08:00 это 24 часа, а
   // не ноль. Нулевую смену задают нулевой длительностью, а не совпадением
   // времён, иначе выразить суточное дежурство было бы нечем.
-  let raw = end - start;
-  if (raw <= 0) raw += MINUTES_PER_DAY;
+  let totalMinutes = end - start;
+  if (totalMinutes <= 0) totalMinutes += MINUTES_PER_DAY;
 
-  // Перерыв берётся буквально, как в формуле раздела 6.1. Отрицательный
-  // перерыв смену удлиняет — раздел 9 разрешает выразить необычный случай, а
-  // «починить» знак молча значит решить за человека, что он опечатался.
-  // Дробный перерыв округляется до минуты: длительность — целые минуты
-  // (инвариант 17), и половина минуты в поле не должна превращать её в дробь.
-  const breakRaw = typeof breakMinutes === "number" && Number.isFinite(breakMinutes) ? breakMinutes : 0;
-  const brk = Math.round(breakRaw);
+  // Перерыв и его оплачиваемая часть берутся буквально, как в формуле раздела
+  // 6.1. Отрицательный перерыв смену удлиняет, а paid_break больше break
+  // добавляет оплачиваемое время сверх перерыва — раздел 9 разрешает выразить
+  // необычный случай, а «починить» знак или порядок молча значит решить за
+  // человека, что он опечатался (инвариант 54). Дробные значения округляются
+  // до минуты: длительность — целые минуты (инвариант 17).
+  const brk = roundedOrZero(breakMinutes);
+  const paidBrk = roundedOrZero(paidBreakMinutes);
+  const unpaidBreak = brk - paidBrk;
 
-  const minutes = raw - brk;
+  const minutes = totalMinutes - unpaidBreak;
   if (minutes < 0) {
-    return { minutes: 0, hours: 0, break_exceeds_shift: true };
+    return { minutes: 0, hours: 0, totalMinutes, break_exceeds_shift: true };
   }
 
   // Деление на 60 — единственное место, где целые минуты становятся десятичными
@@ -99,7 +117,7 @@ export function deriveDurationFromTimes(
   // 7.33 вместо 7.3333…, то есть 219.90 zł вместо 220.00 при ставке 30 zł/ч.
   // На экране число показывает formatHours, а в базе лежит значение, из
   // которого сумма получается верной до гроша.
-  return { minutes, hours: minutes / 60, break_exceeds_shift: false };
+  return { minutes, hours: minutes / 60, totalMinutes, break_exceeds_shift: false };
 }
 
 /** То, из чего раздел 6.1 выводит длительность записи. */
@@ -107,15 +125,29 @@ export interface DurationSource {
   start_time: string | null;
   end_time: string | null;
   break_minutes: number | null;
+  paid_break_minutes: number | null;
   duration_is_manual: boolean;
   hours: number;
 }
 
 export interface ResolvedDuration {
+  /** Оплачиваемые (отработанные) часы — то, что пишется в entry.hours. */
   hours: number;
+  /**
+   * Полное время смены в минутах, для отображения (раздел 8.2: три числа —
+   * общее время, отработанные часы, перерыв). Когда время выводится из
+   * start/end, это буквально end − start. Когда длительность вписана вручную
+   * или взята из значения по умолчанию, число получается алгебраически —
+   * hours×60 + break − paid_break, — что то же самое тождество формулы 6.1,
+   * решённое относительно total. Нигде не хранится отдельным полем: всегда
+   * пересчитывается из того, что уже лежит в записи.
+   */
+  totalMinutes: number;
+  breakMinutes: number;
+  paidBreakMinutes: number;
   /** Длительность получена из времён, связь живая. */
   derived: boolean;
-  /** Инвариант 30: перерыв длиннее смены. Только для выведенной длительности. */
+  /** Инвариант 30 (обобщённый, см. DerivedDuration.break_exceeds_shift). */
   break_exceeds_shift: boolean;
   /**
    * Времена заданы и длительность из них вывести можно. Раздел 8.2: при
@@ -129,25 +161,86 @@ export interface ResolvedDuration {
  * Раздел 6.1 целиком, для одной записи.
  *
  * Ветка значения по умолчанию подставляет default_hours типа дня: раздел 5.3
- * называет там default_duration_minutes, но полей времени у типа дня в коде
- * нет и в эту работу они не входят (см. 5.4.1). Подстановка задокументирована,
- * а не выбрана молча: default_hours покрывает ровно тот же случай — «тип дня
- * говорит, сколько длится такой день».
+ * называет там default_duration_minutes, но отдельного поля с этим именем в
+ * коде нет — default_hours покрывает тот же случай («тип дня говорит, сколько
+ * длится такой день») и остаётся постоянной заменой, а не временным долгом
+ * (см. 5.4.1).
  */
 export function resolveDuration(source: DurationSource, fallback: { default_hours: number }): ResolvedDuration {
-  const derived = deriveDurationFromTimes(source.start_time, source.end_time, source.break_minutes);
+  const derived = deriveDurationFromTimes(
+    source.start_time,
+    source.end_time,
+    source.break_minutes,
+    source.paid_break_minutes,
+  );
   const can_derive = derived !== null;
+  const breakMinutes = roundedOrZero(source.break_minutes);
+  const paidBreakMinutes = roundedOrZero(source.paid_break_minutes);
 
   // Ручная длительность побеждает времена — это первая строка формулы 6.1 и
   // смысл самого флага. Предупреждение о перерыве при этом молчит: оно
-  // объясняет ВЫВЕДЕННОЕ число, а выведенного числа здесь нет.
+  // объясняет ВЫВЕДЕННОЕ число, а выведенного числа здесь нет. "Общее время"
+  // при этом всё равно показывается — алгебраически, из вписанных вручную
+  // часов и перерыва, чтобы три числа на экране всегда были согласованы
+  // между собой.
   if (source.duration_is_manual) {
-    return { hours: source.hours, derived: false, break_exceeds_shift: false, can_derive };
+    const totalMinutes = Math.max(0, Math.round(source.hours * 60) + breakMinutes - paidBreakMinutes);
+    return {
+      hours: source.hours,
+      totalMinutes,
+      breakMinutes,
+      paidBreakMinutes,
+      derived: false,
+      break_exceeds_shift: false,
+      can_derive,
+    };
   }
 
   if (derived) {
-    return { hours: derived.hours, derived: true, break_exceeds_shift: derived.break_exceeds_shift, can_derive: true };
+    return {
+      hours: derived.hours,
+      totalMinutes: derived.totalMinutes,
+      breakMinutes,
+      paidBreakMinutes,
+      derived: true,
+      break_exceeds_shift: derived.break_exceeds_shift,
+      can_derive: true,
+    };
   }
 
-  return { hours: fallback.default_hours, derived: false, break_exceeds_shift: false, can_derive: false };
+  // Без времён у перерыва нет часового пояса, к которому его можно привязать:
+  // "общее время" в этой ветке — не более чем default_hours типа дня, а не
+  // default_hours плюс произвольно вписанный (без начала и конца) перерыв.
+  // Иначе набранные вручную минуты перерыва без единого времени раздували бы
+  // «Общее время смены» числом, которое не соответствует никакой реальной
+  // смене, — часы (единственное, что реально попадёт в базу) при этом не
+  // меняются вовсе.
+  return {
+    hours: fallback.default_hours,
+    totalMinutes: Math.round(fallback.default_hours * 60),
+    breakMinutes,
+    paidBreakMinutes,
+    derived: false,
+    break_exceeds_shift: false,
+    can_derive: false,
+  };
+}
+
+/**
+ * Общее время смены уже СОХРАНЁННОЙ записи, для итогов периода (раздел 6.5) и
+ * расшифровки. Считается только по полям самой записи — hours, break_minutes,
+ * paid_break_minutes, — без обращения к типу дня и без ветки «по умолчанию»:
+ * hours записи уже заморожен (инвариант 10), и пересчитывать его через ЖИВОЙ
+ * default_hours типа дня значило бы дать сохранённой строке поплыть, если тип
+ * дня потом поменяют. Тождественно ResolvedDuration.totalMinutes на той же
+ * записи, но без необходимости в fallback.default_hours.
+ */
+export function totalShiftMinutesOf(entry: {
+  hours: number;
+  break_minutes: number | null;
+  paid_break_minutes: number | null;
+}): number {
+  const breakMinutes = roundedOrZero(entry.break_minutes);
+  const paidBreakMinutes = roundedOrZero(entry.paid_break_minutes);
+  return Math.max(0, Math.round(entry.hours * 60) + breakMinutes - paidBreakMinutes);
 }

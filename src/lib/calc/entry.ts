@@ -1,6 +1,7 @@
 import type { DayType, Entry, Holiday, Period, RateSource, WeekendMultipliers } from "@/types/models";
 import { resolveMultiplier, type MultiplierResult } from "@/lib/calc/multiplier";
 import { roundMoney } from "@/lib/calc/round";
+import { deriveDurationFromTimes } from "@/lib/calc/duration";
 
 /**
  * Раздел 6.4 ТЗ. amount_override побеждает всё остальное; иначе расчёт зависит
@@ -67,6 +68,17 @@ export interface EntryDefaults {
   amount: number;
   rate_source: RateSource;
   multiplier_source: MultiplierResult["source"];
+  /**
+   * Раздел 5.3/6.1: если у типа дня заданы оба времени, они подставляются в
+   * запись вместе с часами, выведенными из них, — связь остаётся живой
+   * (duration_is_manual=false), как и при ручном заполнении времён на пустой
+   * записи. Если хотя бы одного времени нет, все три поля null и часы — это
+   * dayType.default_hours, как и раньше.
+   */
+  start_time: string | null;
+  end_time: string | null;
+  break_minutes: number | null;
+  paid_break_minutes: number | null;
 }
 
 /**
@@ -98,10 +110,25 @@ export function buildEntryDefaultsForDayType(
   const rate_is_manual = isPinned;
   const provisionalRate = isPinned ? (dayType.default_rate ?? 0) : period.base_rate;
 
+  // Раздел 5.3, приоритет: оба времени заданы → часы выводятся из них (и
+  // перерыва/оплачиваемого перерыва типа дня); иначе — default_hours целиком,
+  // как и до этой работы.
+  const derivedFromType = deriveDurationFromTimes(
+    dayType.default_start,
+    dayType.default_end,
+    dayType.default_break_minutes,
+    dayType.default_break_paid_minutes,
+  );
+  const hours = derivedFromType ? derivedFromType.hours : dayType.default_hours;
+  const start_time = derivedFromType ? dayType.default_start : null;
+  const end_time = derivedFromType ? dayType.default_end : null;
+  const break_minutes = derivedFromType ? dayType.default_break_minutes : null;
+  const paid_break_minutes = derivedFromType ? dayType.default_break_paid_minutes : null;
+
   const { amount, rate_per_hour } = calculateEntryAmount(
     {
       amount_override: null,
-      hours: dayType.default_hours,
+      hours,
       multiplier: multiplierResult.value,
       rate_per_hour: provisionalRate,
       rate_is_manual,
@@ -111,7 +138,7 @@ export function buildEntryDefaultsForDayType(
   );
 
   return {
-    hours: dayType.default_hours,
+    hours,
     multiplier: multiplierResult.value,
     rate_per_hour,
     rate_is_manual,
@@ -120,6 +147,10 @@ export function buildEntryDefaultsForDayType(
     // и инвариант 15 требует, чтобы поле описывало, как ставка реально получилась.
     rate_source: isPinned ? "type_pinned" : mapRateSource(false),
     multiplier_source: multiplierResult.source,
+    start_time,
+    end_time,
+    break_minutes,
+    paid_break_minutes,
   };
 }
 

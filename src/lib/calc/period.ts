@@ -1,5 +1,6 @@
-import type { DayType, Entry, Period, PeriodNaming } from "@/types/models";
+import type { DayType, Entry, Period, PeriodNaming, Settings } from "@/types/models";
 import { roundHours, roundMoney } from "@/lib/calc/round";
+import { totalShiftMinutesOf } from "@/lib/calc/duration";
 
 export interface PeriodTotals {
   amount: number;
@@ -21,10 +22,23 @@ function clampDayToMonth(year: number, monthIndex0: number, day: number): number
   return Math.min(day, daysInMonth(year, monthIndex0));
 }
 
+/**
+ * Раздел 6.5: чем считать час записи для «общего времени» и нормы периода.
+ * true (по умолчанию, settings.total_hours_paid_only) — оплачиваемыми часами,
+ * то есть entry.hours ровно как и до появления оплачиваемого перерыва. false —
+ * полным временем смены (с учётом перерыва), см. duration.ts:totalShiftMinutesOf.
+ * Считается по полям самой записи, без обращения к типу дня — hours записи уже
+ * заморожен (инвариант 10), и на итог периода это распространяется тоже.
+ */
+function hoursForTotals(entry: Entry, paidOnly: boolean): number {
+  return paidOnly ? entry.hours : totalShiftMinutesOf(entry) / 60;
+}
+
 export function calculatePeriodTotals(
   period: Pick<Period, "extra_amount" | "norm_hours" | "is_closed" | "is_manual" | "closed_totals">,
   entries: Entry[],
   dayTypeById: Map<string, Pick<DayType, "counts_as_work" | "counts_toward_norm">>,
+  settings: Pick<Settings, "total_hours_paid_only"> = { total_hours_paid_only: true },
 ): PeriodTotals {
   // Раздел 6.4: закрытый период — зафиксированный снимок, ручной период вообще
   // не имеет записей. В обоих случаях суммирование не выполняется, иначе любая
@@ -56,8 +70,9 @@ export function calculatePeriodTotals(
   for (const entry of entries) {
     const dayType = dayTypeById.get(entry.day_type_id);
     amount += entry.amount;
-    if (dayType?.counts_as_work) total_hours += entry.hours;
-    if (dayType?.counts_toward_norm) norm_hours_covered += entry.hours;
+    const hours = hoursForTotals(entry, settings.total_hours_paid_only);
+    if (dayType?.counts_as_work) total_hours += hours;
+    if (dayType?.counts_toward_norm) norm_hours_covered += hours;
   }
 
   // Округляем на выходе, а не в цикле: сумма уже округлённых значений всё

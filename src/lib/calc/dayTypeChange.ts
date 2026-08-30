@@ -19,6 +19,17 @@ const FINANCIAL_FIELDS = [
   "default_multiplier",
   "default_rate",
   "default_hours",
+  // Раздел 6.7 явно называет "default times" среди финансовых полей. Как и у
+  // default_hours, правка этих полей никогда не даёт патчей в
+  // planDayTypeChange ниже (часы существующих записей не трогаются вовсе —
+  // см. комментарий у ЧАСЫ ниже), поэтому предложение "обновить N записей?"
+  // на практике не появляется от одной только правки времён — count всегда 0.
+  // Поле остаётся в списке ради консистентности с 6.7 и на случай, если
+  // правка совпала с правкой ставки/множителя в одном сохранении формы.
+  "default_start",
+  "default_end",
+  "default_break_minutes",
+  "default_break_paid_minutes",
   "counts_as_work",
   "counts_toward_norm",
   "ignore_auto_multipliers",
