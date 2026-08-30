@@ -26,9 +26,14 @@ real device through Safari — the desktop preview won't show it.
 cp .env.example .env
 ```
 
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are only needed once Supabase sync is wired
-up — before that the app works fully offline without them. In Cloudflare the same
-variables are set in the Worker's settings (Settings → Variables and Secrets), not in a file.
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` drive sync (block 8). Left empty, the app
+still works completely — it simply never syncs, and the account screen says so (invariant 39).
+Only the `anon` key belongs here; `service_role` must never reach the client.
+
+In Cloudflare they must be set as **build** variables in Workers Builds, not as runtime worker
+secrets: Vite inlines `VITE_*` when the bundle is built, so a runtime secret never reaches it.
+The Supabase project also needs the production domain and `http://localhost:5173/**` in
+Authentication → URL Configuration, and the SQL in `supabase/sql/` run once by hand.
 
 ## Scripts
 

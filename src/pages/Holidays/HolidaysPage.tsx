@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import { createHoliday, listHolidays, restoreHoliday, softDeleteHoliday } from "@/db/holidays";
 import { updateWeekendMultipliers } from "@/db/settings";
 import { toISODate } from "@/lib/calc/calendarGrid";
@@ -11,11 +11,10 @@ import { NumberInput } from "@/components/NumberInput";
 import { ru } from "@/i18n/ru";
 import type { Holiday } from "@/types/models";
 
-const userId = getLocalUserId();
-
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function HolidaysPage() {
+  const userId = useActiveUserId();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -27,8 +26,8 @@ export function HolidaysPage() {
   const addParam = searchParams.get("add");
   const addDate = addParam !== null && ISO_DATE.test(addParam) ? addParam : null;
 
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
-  const holidays = useLiveQuery(() => listHolidays(db, userId), []);
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
+  const holidays = useLiveQuery(() => listHolidays(db, userId), [userId]);
 
   // Экран мог открыться прямо в форме (плюс из шторки дня, с ?add=) — тогда
   // списка в этом заходе никто не видел, и «назад» должно вести туда, откуда

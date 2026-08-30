@@ -5,7 +5,17 @@ import { usePwaStore } from "@/store/pwaStore";
 import { ru } from "@/i18n/ru";
 import { resetDb } from "@/test/factories";
 
-vi.mock("@/db/localUser", () => ({ getLocalUserId: () => "user-test" }));
+// Облако в тестах приложения не участвует: сеть в тестах не трогаем вовсе, а
+// собственные проверки хука живут в useCloudSession.test.ts.
+vi.mock("@/app/useCloudSession", () => ({ useCloudSession: () => {} }));
+
+vi.mock("@/db/localUser", () => ({
+  getLocalUserId: () => "user-test",
+  getActiveUserId: () => "user-test",
+  getCloudUserId: () => null,
+  setCloudUserId: () => {},
+  clearCloudUserId: () => {},
+}));
 
 beforeEach(async () => {
   await resetDb();

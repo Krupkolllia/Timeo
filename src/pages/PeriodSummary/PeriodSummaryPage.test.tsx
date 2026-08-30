@@ -7,7 +7,13 @@ import { ru } from "@/i18n/ru";
 import { makeDayType, makeEntry, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
 import type { Period } from "@/types/models";
 
-vi.mock("@/db/localUser", () => ({ getLocalUserId: () => "user-test" }));
+vi.mock("@/db/localUser", () => ({
+  getLocalUserId: () => "user-test",
+  getActiveUserId: () => "user-test",
+  getCloudUserId: () => null,
+  setCloudUserId: () => {},
+  clearCloudUserId: () => {},
+}));
 
 const hourly = makeDayType();
 const unpaid = makeDayType({

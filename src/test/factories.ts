@@ -100,13 +100,16 @@ export function makeHoliday(overrides: Partial<Holiday> = {}): Holiday {
 
 /** Полная очистка singleton-базы между тестами: экраны читают именно её. */
 export async function resetDb(): Promise<void> {
-  await db.transaction("rw", db.settings, db.periods, db.day_types, db.entries, db.holidays, async () => {
+  await db.transaction("rw", [db.settings, db.periods, db.day_types, db.entries, db.holidays, db.sync_meta], async () => {
     await Promise.all([
       db.settings.clear(),
       db.periods.clear(),
       db.day_types.clear(),
       db.entries.clear(),
       db.holidays.clear(),
+      // Курсоры синхронизации — тоже состояние базы: тест, начавшийся с чужим
+      // курсором, не докачал бы ничего и был бы зелёным по неверной причине.
+      db.sync_meta.clear(),
     ]);
   });
 }

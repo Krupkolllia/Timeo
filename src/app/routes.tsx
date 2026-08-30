@@ -8,6 +8,7 @@ import { HolidaysPage } from "@/pages/Holidays/HolidaysPage";
 import { PastPeriodsPage } from "@/pages/PastPeriods/PastPeriodsPage";
 import { ExportRestorePage } from "@/pages/ExportRestore/ExportRestorePage";
 import { MorePage } from "@/pages/More/MorePage";
+import { AccountPage } from "@/pages/Account/AccountPage";
 
 // Инвариант 58: у каждого маршрута свой errorElement. Без него react-router
 // показывает собственную страницу «Unexpected Application Error!» — белый фон,
@@ -22,6 +23,7 @@ const routes = [
   { path: "/settings/past-periods", element: <PastPeriodsPage /> },
   { path: "/settings/export", element: <ExportRestorePage /> },
   { path: "/more", element: <MorePage /> },
+  { path: "/more/account", element: <AccountPage /> },
   // Несуществующий адрес — тоже ошибка маршрутизации, и она обязана выглядеть
   // как ошибка приложения, а не как страница фреймворка.
   { path: "*", element: <RouteErrorPanel /> },

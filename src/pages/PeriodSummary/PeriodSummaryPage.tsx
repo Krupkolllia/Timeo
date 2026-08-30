@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
 import { TabBar } from "@/components/TabBar";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import {
   applyBaseRateChange,
   closePeriod,
@@ -29,8 +29,6 @@ import { formatEntryDetail } from "@/lib/format/entry";
 import { ru } from "@/i18n/ru";
 import type { RateChangeMode } from "@/types/models";
 
-const userId = getLocalUserId();
-
 function parsePeriodParam(value: string | null, min: number, max: number): number | null {
   if (value === null || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
@@ -38,12 +36,13 @@ function parsePeriodParam(value: string | null, min: number, max: number): numbe
 }
 
 export function PeriodSummaryPage() {
+  const userId = useActiveUserId();
   const [searchParams] = useSearchParams();
   // Правило «назад» одно на все внутренние экраны, см. useBackTo.
   const goBack = useBackTo("/");
 
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
-  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).toArray(), []);
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
+  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).toArray(), [userId]);
 
   const [rateDialogOpen, setRateDialogOpen] = useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = useState(false);
@@ -83,12 +82,12 @@ export function PeriodSummaryPage() {
     // Как и в календаре, зависим от конкретных полей: правка темы не должна
     // перезапускать поиск/создание периода.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours]);
+  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours, userId]);
 
   const period = useLiveQuery(
     () =>
       viewed ? findLivePeriodQuery(db, userId, viewed.year, viewed.month).first() : undefined,
-    [viewed],
+    [viewed, userId],
   );
 
   const entries = useLiveQuery(async () => {
@@ -102,7 +101,7 @@ export function PeriodSummaryPage() {
     // не гарантирован вовсе: расшифровка не должна переставлять строки между
     // перечитываниями (раздел 5.4 допускает несколько записей на день).
     return rows.sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at));
-  }, [range]);
+  }, [range, userId]);
 
   // Следующий период — только чтобы диалог смены ставки мог назвать его и
   // сказать, создан ли он уже. getOrCreatePeriod здесь не вызывается: он создаёт
@@ -112,7 +111,7 @@ export function PeriodSummaryPage() {
   const nextPeriod = useLiveQuery(
     () =>
       next ? findLivePeriodQuery(db, userId, next.year, next.month).first() : undefined,
-    [next],
+    [next, userId],
   );
 
   const dayTypeById = useMemo(() => new Map((dayTypes ?? []).map((dt) => [dt.id, dt])), [dayTypes]);
