@@ -38,7 +38,7 @@ describe("App", () => {
     vi.resetModules();
     const { App: FreshApp } = await import("@/app/App");
     render(<FreshApp />);
-    expect(await screen.findByText(`${ru.settings.version} ${__APP_VERSION__}`)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: ru.settings.title })).toBeInTheDocument();
   });
 
   it("вкладка «Период» открывает итоги текущего периода без кнопки назад", async () => {
