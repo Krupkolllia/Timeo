@@ -1265,6 +1265,22 @@ describe("DayScreen — ряд типов дня (раздел 8.2)", () => {
     expect(onCreateDayType).toHaveBeenCalledTimes(1);
   });
 
+  it("с несохранёнными правками сначала спрашивает, а не выбрасывает их (переход в создание типа)", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    const { onCreateDayType } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(screen.getByRole("button", { name: ru.day.createDayType }));
+
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    expect(onCreateDayType).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.unsavedSave }));
+    await waitFor(async () => expect((await db.entries.get("e-1"))?.hours).toBe(6));
+    expect(onCreateDayType).toHaveBeenCalledTimes(1);
+  });
+
   it("не показывает в выборе ни архивные, ни удалённые типы (инварианты 11 и 38)", async () => {
     const archived = makeDayType({ id: "dt-arch", name: "Архивный", is_archived: true, sort_order: 5 });
     const deleted = makeDayType({
@@ -1390,6 +1406,22 @@ describe("DayScreen — вход в экран праздников (разде�
 
     const row = await screen.findByText(ru.day.holidayRowNone);
     fireEvent.click(row);
+    expect(onOpenHolidays).toHaveBeenCalledWith({ addDate: DATE });
+  });
+
+  it("с несохранёнными правками сначала спрашивает, чтобы поход за праздником не сбрасывал прогресс", async () => {
+    await db.entries.add(makeEntry({ id: "e-1", hours: 8, amount: 240 }));
+    const { onOpenHolidays } = renderDay();
+    await screen.findByRole("button", { name: ru.day.deleteEntry });
+
+    type(fields().hours, "6");
+    fireEvent.click(await screen.findByText(ru.day.holidayRowNone));
+
+    expect(await screen.findByText(ru.day.unsavedTitle)).toBeInTheDocument();
+    expect(onOpenHolidays).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: ru.day.unsavedSave }));
+    await waitFor(async () => expect((await db.entries.get("e-1"))?.hours).toBe(6));
     expect(onOpenHolidays).toHaveBeenCalledWith({ addDate: DATE });
   });
 

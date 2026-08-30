@@ -853,7 +853,7 @@ export function DayScreen({
           );
         })}
         <button
-          onClick={onCreateDayType}
+          onClick={() => guardDraft(onCreateDayType)}
           aria-label={ru.day.createDayType}
           className="flex w-16 shrink-0 flex-col items-center gap-1"
         >
@@ -957,7 +957,7 @@ export function DayScreen({
               ниже себя ровно в тот момент, когда пользователь целится в поле
               суммы. */}
           <button
-            onClick={() => onOpenHolidays(holiday ? {} : { addDate: date })}
+            onClick={() => guardDraft(() => onOpenHolidays(holiday ? {} : { addDate: date }))}
             className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg bg-app-fg/5 px-3 py-2 text-left active:bg-app-fg/10"
           >
             {/* min-w-0 + truncate: имя праздника пользовательское и длины
