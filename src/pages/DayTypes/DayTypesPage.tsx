@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import {
   applyDayTypeChange,
   countDayTypeChangeTargets,
@@ -21,8 +21,6 @@ import { DayTypeForm } from "@/pages/DayTypes/DayTypeForm";
 import { emptyDayTypeDraft } from "@/pages/DayTypes/dayTypeDefaults";
 import { ru } from "@/i18n/ru";
 import type { DayType } from "@/types/models";
-
-const userId = getLocalUserId();
 
 function toDraft(dayType: DayType): DayTypeDraft {
   return {
@@ -47,6 +45,7 @@ function toDraft(dayType: DayType): DayTypeDraft {
 }
 
 export function DayTypesPage() {
+  const userId = useActiveUserId();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -57,8 +56,8 @@ export function DayTypesPage() {
   const isCreating = searchParams.get("new") === "1";
   const editingId = searchParams.get("edit");
 
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
-  const dayTypes = useLiveQuery(() => listDayTypes(db, userId), []);
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
+  const dayTypes = useLiveQuery(() => listDayTypes(db, userId), [userId]);
 
   // Раздел 6.7 и 8.5 говорят про «текущий период»: и предложение обновить
   // записи, и ставка в списке относятся к периоду СЕГОДНЯШНЕГО дня, а не к
@@ -91,7 +90,7 @@ export function DayTypesPage() {
         (await db.periods.where("[user_id+year+month]").equals([userId, current.year, current.month]).first()) ?? null;
       return { year: current.year, month: current.month, row };
     },
-    [current],
+    [current, userId],
   );
   const period =
     current && periodResult && periodResult.year === current.year && periodResult.month === current.month

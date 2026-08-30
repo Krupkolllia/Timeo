@@ -5,14 +5,12 @@ import { useScrollMemory } from "@/app/useScrollMemory";
 import { TabBar } from "@/components/TabBar";
 import { NumberInput } from "@/components/NumberInput";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import { hasClosedPeriods } from "@/db/periods";
 import { setPeriodStartDay, updateSettings } from "@/db/settings";
 import { periodForDate } from "@/lib/calc/period";
 import type { PeriodNaming, Theme } from "@/types/models";
 import { ru } from "@/i18n/ru";
-
-const userId = getLocalUserId();
 
 const CURRENCY_CHIPS = ["PLN", "EUR", "USD", "GBP", "UAH"];
 
@@ -79,9 +77,10 @@ function CurrencyInput({ value, onChange }: { value: string; onChange: (next: st
 }
 
 export function SettingsPage() {
+  const userId = useActiveUserId();
   const navigate = useNavigate();
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
-  const periodLocked = useLiveQuery(() => hasClosedPeriods(db, userId), []) ?? false;
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
+  const periodLocked = useLiveQuery(() => hasClosedPeriods(db, userId), [userId]) ?? false;
   useScrollMemory("/settings", settings !== undefined);
   const [raceBlockedNotice, setRaceBlockedNotice] = useState(false);
   useEffect(() => {

@@ -5,7 +5,13 @@ import { usePwaStore } from "@/store/pwaStore";
 import { ru } from "@/i18n/ru";
 import { resetDb } from "@/test/factories";
 
-vi.mock("@/db/localUser", () => ({ getLocalUserId: () => "user-test" }));
+vi.mock("@/db/localUser", () => ({
+  getLocalUserId: () => "user-test",
+  getActiveUserId: () => "user-test",
+  getCloudUserId: () => null,
+  setCloudUserId: () => {},
+  clearCloudUserId: () => {},
+}));
 
 beforeEach(async () => {
   await resetDb();

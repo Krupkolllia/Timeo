@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import { bootstrapUser } from "@/db/bootstrap";
 import { findLivePeriodQuery, getOrCreatePeriod } from "@/db/periods";
 import { restoreEntry } from "@/db/entries";
@@ -25,13 +25,12 @@ import { TabBar } from "@/components/TabBar";
 import { MonthYearPicker } from "@/pages/Calendar/MonthYearPicker";
 import { DayScreen } from "@/pages/DayScreen/DayScreen";
 
-const userId = getLocalUserId();
-
 // Стабильная ссылка: пустая карта, созданная на месте, меняла бы зависимость
 // каждый рендер.
 const EMPTY_HOLIDAYS: ReadonlyMap<string, Holiday> = new Map();
 
 export function CalendarPage() {
+  const userId = useActiveUserId();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [viewed, setViewed] = useState<PeriodId | null>(null);
@@ -71,11 +70,11 @@ export function CalendarPage() {
   // отличие от кнопки «Закрыть» рядом.
   const requestCloseDayRef = useRef<(() => void) | null>(null);
 
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
 
   useEffect(() => {
     void bootstrapUser(db, userId);
-  }, []);
+  }, [userId]);
 
   // The period is computed from settings' period_start_day, so we wait for it to load.
   //
@@ -108,18 +107,18 @@ export function CalendarPage() {
     // any unrelated settings edit (e.g. the theme) changes the reference and
     // needlessly re-triggers the period lookup/creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours]);
+  }, [viewed, settings?.default_base_rate, settings?.default_norm_hours, userId]);
 
   const period = useLiveQuery(
     () =>
       viewed ? findLivePeriodQuery(db, userId, viewed.year, viewed.month).first() : undefined,
-    [viewed],
+    [viewed, userId],
   );
 
   // Archived day types stay in this map: they may still be assigned
   // on past days, and the period total must keep counting their hours correctly.
   // Filtering out is_archived is only needed where the user picks a day type.
-  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).sortBy("sort_order"), []);
+  const dayTypes = useLiveQuery(() => db.day_types.where("user_id").equals(userId).sortBy("sort_order"), [userId]);
 
   const entries = useLiveQuery(async () => {
     if (!range) return [];
@@ -128,7 +127,7 @@ export function CalendarPage() {
       .between(toISODate(range.start), toISODate(range.end), true, true)
       .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
       .toArray();
-  }, [range]);
+  }, [range, userId]);
 
   // Раздел 8.1: «выходные и праздники визуально отличаются». Сетка шире
   // периода — она дополняется днями соседних месяцев до целых недель, — и
@@ -151,7 +150,7 @@ export function CalendarPage() {
       .filter((holiday) => holiday.user_id === userId && holiday.deleted_at === null)
       .toArray();
     return { start: gridRange.start, end: gridRange.end, byDate: buildHolidayByDate(rows) };
-  }, [gridRange]);
+  }, [gridRange, userId]);
 
   const holidayByDate = useMemo(
     () =>
@@ -170,7 +169,7 @@ export function CalendarPage() {
   const previousPeriod = useLiveQuery(
     () =>
       previous ? findLivePeriodQuery(db, userId, previous.year, previous.month).first() : undefined,
-    [previous],
+    [previous, userId],
   );
 
   const previousRange = useMemo(
@@ -185,7 +184,7 @@ export function CalendarPage() {
       .between(toISODate(previousRange.start), toISODate(previousRange.end), true, true)
       .filter((entry) => entry.user_id === userId && entry.deleted_at === null)
       .toArray();
-  }, [previousRange]);
+  }, [previousRange, userId]);
 
   useEffect(() => {
     return () => {

@@ -8,7 +8,13 @@ import { ru } from "@/i18n/ru";
 import { makeDayType, makeEntry, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
 import { useBackTo } from "@/app/useBackTo";
 
-vi.mock("@/db/localUser", () => ({ getLocalUserId: () => "user-test" }));
+vi.mock("@/db/localUser", () => ({
+  getLocalUserId: () => "user-test",
+  getActiveUserId: () => "user-test",
+  getCloudUserId: () => null,
+  setCloudUserId: () => {},
+  clearCloudUserId: () => {},
+}));
 
 const hourly = makeDayType();
 

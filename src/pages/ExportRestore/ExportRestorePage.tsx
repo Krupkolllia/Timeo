@@ -2,15 +2,13 @@ import { useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import { importBackup, readBackup } from "@/db/backup";
 import { backupFileName, serializeBackup, type BackupFile } from "@/lib/export/backup";
 import { deliverBackupFile, readTextFile, type DeliveryOutcome } from "@/lib/export/deliver";
 import { parseBackup, type BackupParseError } from "@/lib/export/parse";
 import type { ImportCounts, ImportMode } from "@/lib/export/importPlan";
 import { ru } from "@/i18n/ru";
-
-const userId = getLocalUserId();
 
 interface ChosenFile {
   name: string;
@@ -44,6 +42,7 @@ function outcomeText(outcome: DeliveryOutcome): string {
 }
 
 export function ExportRestorePage() {
+  const userId = useActiveUserId();
   const [searchParams] = useSearchParams();
   // return= — запасной адрес для холодного входа; при живой истории «назад»
   // идёт по ней, иначе экран периода и этот экран зацикливались друг на друге.

@@ -3,14 +3,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useBackTo } from "@/app/useBackTo";
 import { db } from "@/db/db";
-import { getLocalUserId } from "@/db/localUser";
+import { useActiveUserId } from "@/store/userStore";
 import { listManualPeriods, removeManualPeriod, restoreManualPeriod, saveManualPeriod } from "@/db/pastPeriods";
 import { getPeriodIdentityFromLabel, getPeriodLabel, periodForDate } from "@/lib/calc/period";
 import { NumberInput } from "@/components/NumberInput";
 import { ru } from "@/i18n/ru";
 import type { Period } from "@/types/models";
-
-const userId = getLocalUserId();
 
 /** Сколько лет назад можно уйти в выборе месяца. Десять лет истории — заведомо больше, чем перенесёт руками живой человек. */
 const YEARS_BACK = 10;
@@ -29,14 +27,15 @@ interface Draft {
 }
 
 export function PastPeriodsPage() {
+  const userId = useActiveUserId();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // return= — запасной адрес для холодного входа; при живой истории «назад»
   // идёт по ней, иначе экран периода и этот экран зацикливались друг на друге.
   const goBack = useBackTo(searchParams.get("return") ?? "/");
 
-  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), []);
-  const manualPeriods = useLiveQuery(() => listManualPeriods(db, userId), []);
+  const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
+  const manualPeriods = useLiveQuery(() => listManualPeriods(db, userId), [userId]);
   // Все живые периоды — только чтобы предупредить, что за выбранный месяц уже
   // есть обычный период с записями.
   const allPeriods = useLiveQuery(
@@ -46,7 +45,7 @@ export function PastPeriodsPage() {
         .equals(userId)
         .filter((period) => period.deleted_at === null)
         .toArray(),
-    [],
+    [userId],
   );
 
   const [draft, setDraft] = useState<Draft | null>(null);
