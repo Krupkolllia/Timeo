@@ -110,6 +110,10 @@ async function seedDayTypes(database: TimeoDB): Promise<void> {
     counts_as_work: true,
     counts_toward_norm: true,
     default_hours: 8,
+    default_start: null,
+    default_end: null,
+    default_break_minutes: null,
+    default_break_paid_minutes: null,
     default_multiplier: 1,
     default_rate: null,
     ignore_auto_multipliers: false,
@@ -144,6 +148,7 @@ async function seedSettings(database: TimeoDB): Promise<Settings> {
     default_base_rate_from_period: null,
     preferred_rate_change_mode: null,
     seeded_holiday_years: [],
+    total_hours_paid_only: true,
   };
   await database.settings.add(row);
   return row;
@@ -166,6 +171,7 @@ async function seedEntry(database: TimeoDB, overrides: Partial<Entry> & Pick<Ent
     start_time: null,
     end_time: null,
     break_minutes: null,
+    paid_break_minutes: null,
     duration_is_manual: false,
     note: "",
     rate_source: "period_base",

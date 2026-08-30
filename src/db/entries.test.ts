@@ -28,6 +28,7 @@ const baseFields: Omit<Entry, "id" | "created_at" | "updated_at" | "deleted_at">
   start_time: null,
   end_time: null,
   break_minutes: null,
+  paid_break_minutes: null,
   duration_is_manual: false,
   note: "",
   rate_source: "period_base",
@@ -134,6 +135,7 @@ async function seedOpenPeriodAndSettings(database: TimeoDB): Promise<string> {
     default_base_rate_from_period: null,
     preferred_rate_change_mode: null,
     seeded_holiday_years: [],
+    total_hours_paid_only: true,
   });
   const id = crypto.randomUUID();
   await database.periods.add({

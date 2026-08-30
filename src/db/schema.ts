@@ -247,5 +247,57 @@ export class TimeoDB extends Dexie {
           entry.duration_is_manual = true;
         }),
     );
+    // Раздел 5.3: у типа дня появляются собственные времена по умолчанию и
+    // оплачиваемый перерыв (новое понятие, вне исходного ТЗ). У записи —
+    // paid_break_minutes, сколько минут её перерыва оплачивается.
+    //
+    // day_types получают default_start=null, default_end=null,
+    // default_break_minutes=null — «времён нет», формула 6.1 идёт по ветке
+    // default_hours ровно как раньше, потому что для вывода из времён нужны
+    // оба поля start/end, а их нет ни у одного существующего типа.
+    // default_break_paid_minutes=0 — «оплачиваемых минут нет», но это поле
+    // применяется только вместе с default_start/default_end, которых тоже
+    // нет, так что оно ни на что не влияет для существующих типов.
+    //
+    // entries получают paid_break_minutes=0 — «перерыв целиком неоплачиваемый».
+    // Формула 6.1 до этой миграции всегда вычитала break_minutes целиком, то
+    // есть paid_break_minutes=0 — не осторожное умолчание, а буквальное
+    // описание того, что уже произошло с каждой существующей записью:
+    // worked = total − (break − paid_break) при paid_break=0 даёт то же
+    // число, что и старая формула duration = raw − break_minutes.
+    //
+    // Ни hours, ни amount, ни rate_source, ни updated_at не трогаются, periods
+    // здесь не открывается вовсе — ни одна сумма и ни один закрытый период не
+    // могут измениться (инвариант 2).
+    //
+    // settings.total_hours_paid_only=true — «итоги периода считаются по
+    // оплачиваемым часам», то есть ровно то, чем entries.hours уже был
+    // всегда: раздел 6.5 продолжает суммировать то же самое число, что и до
+    // этой миграции, пока человек сам не переключит настройку.
+    this.version(9).upgrade((tx) =>
+      Promise.all([
+        tx
+          .table("day_types")
+          .toCollection()
+          .modify((dayType: DayType) => {
+            dayType.default_start = null;
+            dayType.default_end = null;
+            dayType.default_break_minutes = null;
+            dayType.default_break_paid_minutes = 0;
+          }),
+        tx
+          .table("entries")
+          .toCollection()
+          .modify((entry: Entry) => {
+            entry.paid_break_minutes = 0;
+          }),
+        tx
+          .table("settings")
+          .toCollection()
+          .modify((settings: Settings) => {
+            settings.total_hours_paid_only = true;
+          }),
+      ]),
+    );
   }
 }

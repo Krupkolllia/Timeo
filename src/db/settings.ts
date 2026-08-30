@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, keyof BaseRecord> = {
   default_base_rate_from_period: null,
   preferred_rate_change_mode: null,
   seeded_holiday_years: [],
+  total_hours_paid_only: true,
 };
 
 export async function ensureSettings(db: TimeoDB, userId: string): Promise<Settings> {
