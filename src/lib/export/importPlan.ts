@@ -141,12 +141,16 @@ export function planImport(input: ImportPlanInput): ImportPlan {
   const localDayTypes = replace ? new Map<string, DayType>() : new Map(current.day_types.map((row) => [row.id, row]));
   const localEntries = replace ? new Map<string, Entry>() : new Map(current.entries.map((row) => [row.id, row]));
   const localHolidays = replace ? new Map<string, Holiday>() : new Map(current.holidays.map((row) => [row.id, row]));
-  const localPeriods = replace ? new Map<string, Period>() : new Map(current.periods.map((row) => [row.id, row]));
+  // Только живые: мягко удалённой строки для пользователя не существует
+  // (инвариант 38), и «добавить недостающее» обязано считать её месяц
+  // свободным — иначе восстановление молча не вернуло бы удалённый период.
+  const livePeriods = current.periods.filter((row) => row.deleted_at === null);
+  const localPeriods = replace ? new Map<string, Period>() : new Map(livePeriods.map((row) => [row.id, row]));
   // Период опознаётся не только по id: две строки на один year+month сломали бы
   // выборку периода (она берёт .first()), и месяц раздвоился бы навсегда.
   const localPeriodByMonth = replace
     ? new Map<string, Period>()
-    : new Map(current.periods.map((row) => [`${row.year}:${row.month}`, row]));
+    : new Map(livePeriods.map((row) => [`${row.year}:${row.month}`, row]));
 
   const dayTypeIdMap = new Map<string, string>();
   const dayTypes: DayType[] = [];

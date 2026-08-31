@@ -235,7 +235,15 @@ async function pushTable(
     counts.pushed += chunk.length;
     // Знак двигается ТОЛЬКО после подтверждения сервером (инвариант 43): упавшая
     // выгрузка обязана повториться целиком, а не считаться сделанной.
-    const highest = chunk.reduce((max, row) => (row.updated_at > max ? row.updated_at : max), meta.pushed_through[table] ?? "");
+    // Сравнение строковое, а нечитаемая отметка («hello») сортируется выше
+    // любой даты ISO. Попав в знак, она превращает since в NaN, и тогда
+    // условие at >= since ложно для КАЖДОЙ здоровой строки: таблица молча
+    // перестала бы выгружаться навсегда (инвариант 43).
+    const highest = chunk.reduce(
+      (max, row) =>
+        Number.isFinite(Date.parse(row.updated_at)) && row.updated_at > max ? row.updated_at : max,
+      meta.pushed_through[table] ?? "",
+    );
     meta.pushed_through[table] = highest;
   }
 }

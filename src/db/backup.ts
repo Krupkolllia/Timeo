@@ -1,6 +1,7 @@
 import type { TimeoDB } from "@/db/schema";
 import { buildBackup, type BackupFile } from "@/lib/export/backup";
 import { planImport, type ImportCounts, type ImportMode } from "@/lib/export/importPlan";
+import { resetSyncMeta } from "@/db/syncMeta";
 
 /**
  * Раздел 8.8, инвариант 46. Читаются только строки этого пользователя; мягко
@@ -46,7 +47,7 @@ export async function importBackup(
   file: BackupFile,
   mode: ImportMode,
 ): Promise<ImportCounts> {
-  return db.transaction("rw", db.settings, db.periods, db.day_types, db.entries, db.holidays, async () => {
+  const counts = await db.transaction("rw", db.settings, db.periods, db.day_types, db.entries, db.holidays, async () => {
     // Только строки этого пользователя. Соблазн взять все (чтобы чужой
     // идентификатор случайно не оказался занят) ведёт к худшему: если
     // localStorage очистился отдельно от IndexedDB, локальный user_id стал
@@ -97,4 +98,12 @@ export async function importBackup(
 
     return plan.counts;
   });
+
+  // Ровно то же, что делает adoptAccount: восстановленные строки несут
+  // updated_at из файла, а он старше водяного знака выгрузки. Без сброса отбор
+  // в pushTable отбросил бы их все, и восстановленное осталось бы на телефоне,
+  // а в облаке и на втором устройстве — то, что было до восстановления
+  // (инвариант 43).
+  await resetSyncMeta(db, userId);
+  return counts;
 }
