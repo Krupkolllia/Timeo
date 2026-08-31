@@ -196,6 +196,25 @@ export function AccountPage() {
               >
                 {ru.account.differentUserConfirm}
               </button>
+              {/* Из этого экрана обязан быть выход, не равный стиранию
+                  (инвариант 54): человек мог войти не тем аккаунтом по ошибке.
+                  Отмена — это выход из только что начатой сессии, и ни одной
+                  строки она не трогает (инвариант 44). Кнопка стоит ниже
+                  красной: под большим пальцем должно лежать безопасное. */}
+              <button
+                className="min-h-11 w-full rounded-lg bg-app-fg/10 py-3 text-sm font-medium active:bg-app-fg/20 disabled:opacity-50"
+                disabled={busy}
+                onClick={() =>
+                  void withBusy(async () => {
+                    await signOut();
+                    setEraseUnderstood(false);
+                    await handleAccountChange(db, cloudGateway, null, __APP_VERSION__);
+                  })
+                }
+              >
+                {ru.account.differentUserCancel}
+              </button>
+              <p className="text-xs text-app-fg/30">{ru.account.differentUserCancelHint}</p>
             </div>
           </section>
         )}

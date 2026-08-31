@@ -986,8 +986,10 @@ the button in Russian; the provider's own English message never reaches the scre
 happened or what went wrong, sync now, and sign out with a line saying plainly that nothing is deleted
 from the phone. Two more states live on the same screen: the first-sign-in question (both sides shown
 as counts, two modes, nothing preselected) and the different-account warning, which lists what would be
-erased as numbers, offers to save a file first, and needs a read-and-confirm checkbox before the erase
-button becomes usable. Primary actions sit in the lower half throughout (invariant 59).
+erased as numbers, offers to save a file first, needs a read-and-confirm checkbox before the erase
+button becomes usable, and — below the erase button, where the thumb rests — offers to not sign in with
+that account at all: the way out of that screen that is not an erase (invariant 54). Cancelling signs
+out of the session that was just started and touches no local row (invariant 44). Primary actions sit in the lower half throughout (invariant 59).
 
 ### 8.5 Day types
 
