@@ -159,9 +159,33 @@ export function planImport(input: ImportPlanInput): ImportPlan {
   for (const row of current.day_types) maxSortOrder = Math.max(maxSortOrder, row.sort_order);
   for (const row of file.day_types) maxSortOrder = Math.max(maxSortOrder, row.sort_order);
 
+  // Пресеты засеиваются со случайным id на каждом устройстве, поэтому
+  // «Рабочий день» из облака и «Рабочий день» на телефоне — это строки с
+  // разными идентификаторами. Сверка только по id принимала бы их за разные
+  // типы и добавляла бы полный комплект пресетов на каждый вход в аккаунт.
+  // Совпадением считается имя вместе с режимом оплаты: два типа с одним
+  // именем, но разной оплатой — это разные типы, и схлопывать их нельзя.
+  const sameTypeKey = (row: DayType): string => `${row.name.trim().toLowerCase()}\u0000${row.pay_mode}`;
+  const localByContent = new Map<string, DayType>();
+  if (!replace) {
+    for (const row of current.day_types) {
+      if (row.deleted_at !== null) continue;
+      const key = sameTypeKey(row);
+      if (!localByContent.has(key)) localByContent.set(key, row);
+    }
+  }
+
   for (const imported of file.day_types) {
     const local = localDayTypes.get(imported.id);
     if (!local) {
+      const twin = localByContent.get(sameTypeKey(imported));
+      if (twin) {
+        // Тип уже есть, просто под другим идентификатором. Записи из файла
+        // перецепляются на него — иначе они осиротели бы (инвариант 36).
+        dayTypeIdMap.set(imported.id, twin.id);
+        counts.skipped++;
+        continue;
+      }
       dayTypes.push(withUser(imported, userId));
       counts.day_types++;
       continue;

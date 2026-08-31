@@ -234,6 +234,42 @@ describe("TimeoDB schema migration", () => {
     upgraded.close();
   });
 
+  it("схлопывает дубли типов дня, накопленные входами в аккаунт", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+    // Три комплекта одного пресета: по одному на каждый вход в аккаунт.
+    await legacy.table("day_types").bulkAdd([
+      legacyDayType({ id: "dt-first", created_at: "2026-01-01T00:00:00.000Z" }),
+      legacyDayType({ id: "dt-used", created_at: "2026-02-01T00:00:00.000Z" }),
+      legacyDayType({ id: "dt-unused", created_at: "2026-03-01T00:00:00.000Z" }),
+      legacyDayType({ id: "dt-other", name: "Отпуск", created_at: "2026-01-01T00:00:00.000Z" }),
+    ]);
+    await legacy.table("entries").add(legacyEntry({ id: "e-1", day_type_id: "dt-used" }));
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    // Самый ранний остаётся как есть.
+    expect((await upgraded.day_types.get("dt-first"))?.deleted_at).toBeNull();
+    expect((await upgraded.day_types.get("dt-first"))?.is_archived).toBe(false);
+    // На этот дубль ссылается запись: удалить нельзя (инвариант 11), уходит в архив.
+    expect((await upgraded.day_types.get("dt-used"))?.deleted_at).toBeNull();
+    expect((await upgraded.day_types.get("dt-used"))?.is_archived).toBe(true);
+    // Ссылок нет — мягкое удаление.
+    expect((await upgraded.day_types.get("dt-unused"))?.deleted_at).not.toBeNull();
+    // Другой тип не тронут.
+    expect((await upgraded.day_types.get("dt-other"))?.deleted_at).toBeNull();
+    // Запись не изменилась ни одним полем: сумма и тип остались при ней.
+    expect((await upgraded.entries.get("e-1"))?.day_type_id).toBe("dt-used");
+    expect((await upgraded.entries.get("e-1"))?.updated_at).toBe("2026-08-01T00:00:00.000Z");
+
+    upgraded.close();
+  });
+
   it("rewrites the multiplier to 1 on manual-rate entries stored under the old formula", async () => {
     dbName = `timeo-test-${crypto.randomUUID()}`;
 

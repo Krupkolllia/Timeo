@@ -314,5 +314,46 @@ export class TimeoDB extends Dexie {
     this.version(10).stores({
       sync_meta: "user_id",
     });
+    // Пресеты засеивались со случайным id на каждом устройстве, а слияние при
+    // входе в аккаунт сверяло типы только по id — поэтому каждый вход добавлял
+    // ещё один комплект из шести. Здесь накопленные дубли схлопываются.
+    //
+    // Записи НЕ трогаются ни одной строкой: перецепить запись значило бы
+    // изменить её внутри, в том числе в закрытом периоде (инвариант 2), а
+    // сумма и ставка лежат в самой записи и от типа не зависят. Поэтому дубль,
+    // на который кто-то ссылается, не удаляется, а уходит в архив: из списка
+    // выбора он исчезает, на старых записях остаётся виден (инвариант 11).
+    // Дубль без единой ссылки удаляется мягко (инвариант 38).
+    this.version(11).upgrade(async (tx) => {
+      const dayTypes = (await tx.table("day_types").toArray()) as DayType[];
+      const entries = (await tx.table("entries").toArray()) as Entry[];
+      const referenced = new Set(entries.filter((row) => row.deleted_at === null).map((row) => row.day_type_id));
+
+      const survivors = new Map<string, DayType>();
+      const doomed: DayType[] = [];
+      const live = dayTypes
+        .filter((row) => row.deleted_at === null)
+        .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
+
+      for (const row of live) {
+        const key = `${row.user_id}\u0000${row.name.trim().toLowerCase()}\u0000${row.pay_mode}`;
+        // Побеждает самый ранний: это тот тип, который человек видел всё время
+        // до первого входа в аккаунт, и именно на него ссылается большинство записей.
+        if (!survivors.has(key)) survivors.set(key, row);
+        else doomed.push(row);
+      }
+      if (doomed.length === 0) return;
+
+      const now = new Date().toISOString();
+      await tx
+        .table("day_types")
+        .bulkPut(
+          doomed.map((row) =>
+            referenced.has(row.id)
+              ? { ...row, is_archived: true, updated_at: now }
+              : { ...row, deleted_at: now, updated_at: now },
+          ),
+        );
+    });
   }
 }

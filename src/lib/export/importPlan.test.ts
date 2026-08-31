@@ -293,3 +293,39 @@ describe("planImport: мягко удалённые строки", () => {
     expect(plan.periods.map((row) => row.base_rate)).toEqual([41]);
   });
 });
+
+describe("planImport: пресеты с разными id", () => {
+  it("одинаковый тип из файла не добавляется вторым, записи цепляются к своему", () => {
+    // Ровно случай входа в аккаунт: тот же пресет, засеянный на другом
+    // устройстве, приезжает с другим идентификатором.
+    const local = makeDayType({ id: "dt-local", name: "Рабочий день", pay_mode: "hourly" });
+    const imported = makeDayType({ id: "dt-cloud", name: "Рабочий день", pay_mode: "hourly" });
+    const entry = makeEntry({ id: "e-1", day_type_id: "dt-cloud" });
+
+    const plan = planImport({
+      file: file({ day_types: [imported], entries: [entry] }),
+      current: { settings: null, periods: [], day_types: [local], entries: [], holidays: [] },
+      mode: "merge" as ImportMode,
+      userId: LOCAL_USER,
+      newId: () => "generated",
+    });
+
+    expect(plan.day_types).toEqual([]);
+    expect(plan.entries.map((row) => row.day_type_id)).toEqual(["dt-local"]);
+  });
+
+  it("одно имя, но разная оплата — это разные типы, они не схлопываются", () => {
+    const local = makeDayType({ id: "dt-local", name: "Отпуск", pay_mode: "hourly" });
+    const imported = makeDayType({ id: "dt-cloud", name: "Отпуск", pay_mode: "unpaid" });
+
+    const plan = planImport({
+      file: file({ day_types: [imported] }),
+      current: { settings: null, periods: [], day_types: [local], entries: [], holidays: [] },
+      mode: "merge" as ImportMode,
+      userId: LOCAL_USER,
+      newId: () => "generated",
+    });
+
+    expect(plan.day_types.map((row) => row.id)).toEqual(["dt-cloud"]);
+  });
+});
