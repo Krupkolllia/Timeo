@@ -1,8 +1,21 @@
 {
   "name": "timeo",
   "compatibility_date": "2026-08-27",
+  // Блок 9. До него воркер-скрипта не было вовсе — раздавал только слой
+  // ассетов. Раздел 4 ТЗ: cron'ы садятся в тот же воркер, что хостит
+  // приложение, потому что на Pages они потребовали бы второго проекта.
+  "main": "workers/index.ts",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Через эту привязку workers/index.ts отдаёт статику. Без неё запрос,
+    // не совпавший с файлом, доходил бы до скрипта, а отдать файл было бы нечем.
+    "binding": "ASSETS"
+  },
+  "triggers": {
+    // Keep-alive раз в сутки: бесплатный Supabase засыпает после недели
+    // простоя (разделы 4 и 12). Выражения должны совпадать с константами в
+    // workers/index.ts — Cloudflare различает задачи именно по ним.
+    "crons": ["17 3 * * *"]
   }
 }
