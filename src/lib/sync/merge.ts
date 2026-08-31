@@ -72,13 +72,19 @@ export function clampFutureUpdatedAt<T extends BaseRecord>(row: T, serverNow: st
  * становятся.
  */
 export function rowsEqual(a: BaseRecord, b: BaseRecord): boolean {
-  const norm = (row: BaseRecord): string => {
-    const entries = Object.entries(row as unknown as Record<string, unknown>)
+  // Сортировка нужна на всех уровнях, а не только на верхнем: closed_totals и
+  // weekend_multipliers — это jsonb, а Postgres хранит его ключи в своём
+  // порядке. Вернувшаяся строка отличалась бы от отправленной, и эхо
+  // собственной выгрузки записывалось бы в базу заново каждый цикл.
+  const canon = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canon);
+    if (value === null || typeof value !== "object") return value;
+    return Object.entries(value as Record<string, unknown>)
       .filter(([key]) => key !== "server_updated_at")
-      .sort(([x], [y]) => (x < y ? -1 : 1));
-    return JSON.stringify(entries);
+      .sort(([x], [y]) => (x < y ? -1 : 1))
+      .map(([key, item]) => [key, canon(item)]);
   };
-  return norm(a) === norm(b);
+  return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
 export interface PullPlan<T extends BaseRecord> {
@@ -143,10 +149,12 @@ export function planDayTypesPull(
 
   for (const row of base.apply) {
     if (row.deleted_at !== null && referencedTypeIds.has(row.id)) {
-      const own = local.get(row.id);
-      // Локальной версии нет вовсе — воскрешать нечего, но и осиротить записи
-      // нельзя: возвращаем тип живым, с той же косметикой, что приехала.
-      resurrect.push({ ...(own ?? row), deleted_at: null, updated_at: serverNow });
+      // Берём приехавшую версию, а не локальную: в base.apply строка попадает
+      // только когда своей версии нет вовсе либо удалённая выиграла
+      // last-write-wins, то есть локальная здесь заведомо устаревшая. Разлив её
+      // обратно (воскрешённое уходит в forcePush) откатил бы переименование и
+      // множитель на всех устройствах. Отменяем только удаление.
+      resurrect.push({ ...row, deleted_at: null, updated_at: serverNow });
       continue;
     }
     apply.push(row);

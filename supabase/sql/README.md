@@ -6,6 +6,7 @@ The files here are run manually in the Supabase SQL Editor, in filename order:
 
 - `001_schema.sql` — tables mirroring the local Dexie schema (`src/db/schema.ts`), the
   `server_updated_at` trigger, indexes, and RLS keyed on `auth.uid() = user_id`.
+- `002_defaults.sql` — realigns two `settings` column defaults with `DEFAULT_SETTINGS` in `src/db/settings.ts`.
 
 Each file is idempotent and can be re-run safely.
 

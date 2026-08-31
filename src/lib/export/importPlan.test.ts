@@ -276,3 +276,20 @@ describe("planImport — настройки", () => {
     expect(new Set(users)).toEqual(new Set([LOCAL_USER]));
   });
 });
+
+describe("planImport: мягко удалённые строки", () => {
+  it("инвариант 38: удалённый период не занимает свой месяц при слиянии", () => {
+    const deleted = makePeriod({ id: "p-08", year: 2026, month: 8, deleted_at: "2026-08-20T10:00:00.000Z" });
+    const imported = makePeriod({ id: "p-08-file", year: 2026, month: 8, base_rate: 41 });
+
+    const plan = planImport({
+      file: file({ periods: [imported] }),
+      current: { settings: null, periods: [deleted], day_types: [], entries: [], holidays: [] },
+      mode: "merge" as ImportMode,
+      userId: LOCAL_USER,
+      newId: () => "generated",
+    });
+
+    expect(plan.periods.map((row) => row.base_rate)).toEqual([41]);
+  });
+});

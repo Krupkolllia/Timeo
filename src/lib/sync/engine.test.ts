@@ -42,6 +42,24 @@ describe("syncOnce", () => {
     expect(cloud.row<Entry>("entries", "e-11")?.amount).toBe(318.47);
   });
 
+  it("инвариант 43: нечитаемый updated_at не отравляет водяной знак выгрузки", async () => {
+    const cloud = new FakeCloud();
+    await db.day_types.put(makeDayType());
+    await db.entries.bulkPut([
+      makeEntry({ id: "e-ok", updated_at: "2026-08-30T09:00:00.000Z" }),
+      // Так выглядит строка из повреждённого файла бэкапа: parse пропускает
+      // любую строку как есть. При строковом сравнении «hello» больше любой ISO-даты.
+      makeEntry({ id: "e-bad", date: "2026-08-11", updated_at: "hello" }),
+    ]);
+
+    await syncOnce(db, USER_ID, cloud);
+    expect(Number.isNaN(Date.parse((await readSyncMeta(db, USER_ID)).pushed_through.entries ?? ""))).toBe(false);
+
+    await db.entries.put(makeEntry({ id: "e-new", date: "2026-08-12", updated_at: "2026-08-30T11:00:00.000Z" }));
+    await syncOnce(db, USER_ID, cloud);
+    expect(cloud.row("entries", "e-new")).toBeDefined();
+  });
+
   it("инвариант 42: строка с updated_at из будущего не выигрывает конфликт навсегда", async () => {
     const cloud = new FakeCloud("2026-08-30T12:00:00.000Z");
     // Телефон с часами на год вперёд сохранил ставку 41.5.

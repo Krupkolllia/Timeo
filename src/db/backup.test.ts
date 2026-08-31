@@ -7,6 +7,7 @@ import { calculatePeriodTotals } from "@/lib/calc/period";
 import { RECOVERED_DAY_TYPE_NAME } from "@/lib/export/importPlan";
 import { makeDayType, makeEntry, makeHoliday, makePeriod, makeSettings, resetDb, USER_ID } from "@/test/factories";
 
+import { readSyncMeta } from "@/db/syncMeta";
 const NOW = "2026-08-29T10:00:00.000Z";
 
 /**
@@ -388,5 +389,33 @@ describe("замена всего", () => {
 
     expect(await db.entries.count()).toBe(0);
     expect(await db.settings.count()).toBe(1);
+  });
+
+  it("инвариант 43: восстановление сбрасывает водяные знаки выгрузки", async () => {
+    // Иначе восстановленные строки со старым updated_at не прошли бы отбор в
+    // pushTable и остались бы только на телефоне.
+    await db.sync_meta.put({
+      user_id: USER_ID,
+      pull_cursor: { entries: "2026-08-30T12:00:00.000Z" },
+      pushed_through: { entries: "2026-08-30T12:00:00.000Z" },
+      clock_guard: 0,
+      last_sync_at: null,
+      last_error: null,
+    });
+
+    await importBackup(db, USER_ID, {
+      schema_version: 1,
+      exported_at: NOW,
+      app_version: "0.1.7",
+      settings: makeSettings({ id: "s-new" }),
+      periods: [],
+      day_types: [],
+      entries: [],
+      holidays: [],
+    }, "merge");
+
+    const meta = await readSyncMeta(db, USER_ID);
+    expect(meta.pushed_through).toEqual({});
+    expect(meta.pull_cursor).toEqual({});
   });
 });

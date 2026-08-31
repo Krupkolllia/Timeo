@@ -7,6 +7,7 @@ import {
   planEntriesPull,
   planPull,
   resolveRow,
+  rowsEqual,
 } from "@/lib/sync/merge";
 import { makeDayType, makeEntry, makePeriod } from "@/test/factories";
 import type { RemoteRow } from "@/lib/sync/types";
@@ -139,11 +140,43 @@ describe("planEntriesPull", () => {
   });
 });
 
+describe("rowsEqual", () => {
+  it("эхо собственной выгрузки узнаётся, даже если Postgres переставил ключи внутри jsonb", () => {
+    const own = makePeriod({
+      id: "p-08",
+      is_closed: true,
+      closed_totals: { amount: 4128.72, total_hours: 168, norm_hours_covered: 168 },
+    });
+    // Ровно та же строка, вернувшаяся из облака: jsonb хранит ключи в своём
+    // порядке, и порядок полей верхнего уровня тоже другой.
+    const echoed = {
+      ...own,
+      closed_totals: { norm_hours_covered: 168, amount: 4128.72, total_hours: 168 },
+    } as typeof own;
+
+    expect(rowsEqual(own, echoed)).toBe(true);
+  });
+
+  it("разное содержимое вложенного объекта остаётся разным", () => {
+    const own = makePeriod({ id: "p-08", closed_totals: { amount: 4128.72, total_hours: 168, norm_hours_covered: 168 } });
+    const other = { ...own, closed_totals: { amount: 4128.73, total_hours: 168, norm_hours_covered: 168 } } as typeof own;
+
+    expect(rowsEqual(own, other)).toBe(false);
+  });
+});
+
 describe("planDayTypesPull", () => {
   it("инвариант 37: приехавшее удаление типа дня не применяется, пока на него ссылаются живые записи", () => {
-    const local = makeDayType({ id: "dt-hourly", updated_at: "2026-08-01T00:00:00.000Z" });
+    // Имена намеренно разные: на одинаковых проверка ниже проходила бы при
+    // любом поведении и ничего бы не доказывала.
+    const local = makeDayType({ id: "dt-hourly", name: "Смена", updated_at: "2026-08-01T00:00:00.000Z" });
     const deletion = remote(
-      makeDayType({ id: "dt-hourly", deleted_at: "2026-08-30T09:00:00.000Z", updated_at: "2026-08-30T09:00:00.000Z" }),
+      makeDayType({
+        id: "dt-hourly",
+        name: "Ночная смена",
+        deleted_at: "2026-08-30T09:00:00.000Z",
+        updated_at: "2026-08-30T09:00:00.000Z",
+      }),
       "2026-08-30T09:30:05.000Z",
     );
 
@@ -157,8 +190,36 @@ describe("planDayTypesPull", () => {
     expect(plan.apply).toEqual([]);
     expect(plan.resurrect.map((row) => row.id)).toEqual(["dt-hourly"]);
     expect(plan.resurrect[0].deleted_at).toBeNull();
-    // Косметика приехавшей версии сохраняется — воскрешается сам факт существования типа.
-    expect(plan.resurrect[0].name).toBe(local.name);
+  });
+
+  it("воскрешение берёт приехавшее имя, а не устаревшее локальное", () => {
+    // Другое устройство переименовало тип и потом удалило его. Локальная
+    // версия старше — она проиграла last-write-wins и попала сюда только
+    // потому, что удаление применить нельзя. Разлить её обратно значит
+    // откатить переименование на всех устройствах: воскрешённое уходит в
+    // forcePush и выгружается поверх облачной версии.
+    const local = makeDayType({ id: "dt-hourly", name: "Смена", updated_at: "2026-08-01T00:00:00.000Z" });
+    const deletion = remote(
+      makeDayType({
+        id: "dt-hourly",
+        name: "Ночная смена",
+        default_multiplier: 1.5,
+        deleted_at: "2026-08-30T09:00:00.000Z",
+        updated_at: "2026-08-30T09:00:00.000Z",
+      }),
+      "2026-08-30T09:30:05.000Z",
+    );
+
+    const plan = planDayTypesPull(
+      new Map<string, DayType>([[local.id, local]]),
+      [deletion],
+      SERVER_NOW,
+      new Set(["dt-hourly"]),
+    );
+
+    expect(plan.resurrect[0].name).toBe("Ночная смена");
+    expect(plan.resurrect[0].default_multiplier).toBe(1.5);
+    expect(plan.resurrect[0].deleted_at).toBeNull();
   });
 
   it("удаление типа дня, на который никто не ссылается, применяется как обычная строка", () => {

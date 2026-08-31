@@ -12,7 +12,9 @@ export function createSupabaseGateway(client: SupabaseClient, restUrl: string, a
       // Часы берём у сервера, а не у телефона: инвариант 42 держится именно на
       // этом, а Date.now() на устройстве с неверным временем — не источник
       // истины (инвариант 33). Заголовок Date есть у любого ответа PostgREST.
-      const response = await fetch(`${restUrl}/rest/v1/`, {
+      // Хвостовой слеш в переменной окружения — обычное дело: тот же приём
+      // уже стоит в workers/keepalive.ts.
+      const response = await fetch(`${restUrl.replace(/\/+$/, "")}/rest/v1/`, {
         method: "HEAD",
         headers: { apikey: anonKey },
       });
