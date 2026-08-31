@@ -3,7 +3,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db } from "@/db/db";
 import { useActiveUserId } from "@/store/userStore";
-import { bootstrapUser } from "@/db/bootstrap";
 import { findLivePeriodQuery, getOrCreatePeriod } from "@/db/periods";
 import { restoreEntry } from "@/db/entries";
 import type { Entry, Holiday } from "@/types/models";
@@ -71,10 +70,6 @@ export function CalendarPage() {
   const requestCloseDayRef = useRef<(() => void) | null>(null);
 
   const settings = useLiveQuery(() => db.settings.where("user_id").equals(userId).first(), [userId]);
-
-  useEffect(() => {
-    void bootstrapUser(db, userId);
-  }, [userId]);
 
   // The period is computed from settings' period_start_day, so we wait for it to load.
   //
