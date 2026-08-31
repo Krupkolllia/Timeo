@@ -689,10 +689,16 @@ export function DayScreen({
   // dayType.default_hours: у типа с заданными временами "по умолчанию" — это
   // то, что выводится из них, а не поле, которое формула 6.1 в этом случае
   // даже не читает.
-  const hoursDiffersFromDefault =
-    draft !== null &&
-    dayType !== undefined &&
-    draft.hours !== buildEntryDefaultsForDayType(parsedDate, dayType, period, holiday, settings.weekend_multipliers).hours;
+  // useMemo, а не вызов в теле рендера: экран перерисовывается на каждое
+  // нажатие клавиши, а от полного пересчёта здесь нужно одно поле.
+  const defaultHours = useMemo(
+    () =>
+      dayType === undefined
+        ? null
+        : buildEntryDefaultsForDayType(parsedDate, dayType, period, holiday, settings.weekend_multipliers).hours,
+    [parsedDate, dayType, period, holiday, settings.weekend_multipliers],
+  );
+  const hoursDiffersFromDefault = draft !== null && defaultHours !== null && draft.hours !== defaultHours;
 
   const showManyHoursHint = (draft?.hours ?? 0) > 24;
   // Нулевая базовая ставка периода — причина, а «ставка за час равна нулю» —

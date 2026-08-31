@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { db } from "@/db/db";
+import { bootstrapUser } from "@/db/bootstrap";
 import { CalendarPage } from "@/pages/Calendar/CalendarPage";
 import { PRESET_DAY_TYPES } from "@/db/dayTypes";
 import { ru } from "@/i18n/ru";
@@ -36,6 +37,10 @@ function PeriodSummaryStub() {
 
 function renderCalendar(initialEntry: string | string[] = "/") {
   const entries = Array.isArray(initialEntry) ? initialEntry : [initialEntry];
+  // Посев живёт в App, а не на экране: холодный запуск на /period или /more
+  // обязан создать настройки и типы дня так же. Здесь он воспроизводится, иначе
+  // тест проверял бы календарь в условиях, которых в приложении не бывает.
+  void bootstrapUser(db, USER_ID);
   render(
     <MemoryRouter initialEntries={entries}>
       <LocationProbe />
