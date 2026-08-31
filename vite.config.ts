@@ -87,11 +87,11 @@ export default defineConfig({
     },
   },
   test: {
-    // jsdom, а не node: экраны — половина приложения, и до появления
-    // компонентных тестов ни одна их строка не проверялась вовсе. Расчётные
-    // тесты от смены окружения не страдают.
-    environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    // Окружение и посев переехали в vitest.workspace.ts: с блока 9 наборов
+    // два — экраны в jsdom (до компонентных тестов ни одна их строка не
+    // проверялась вовсе; расчётные тесты от окружения не страдают) и воркер
+    // в node. Здесь остаётся общее для обоих.
+    //
     // Agent worktrees under .claude/worktrees are only git-ignored via the local,
     // unshared .git/info/exclude — Vitest globs the filesystem directly and would
     // otherwise pick up whatever stale branch state happens to be checked out there.
@@ -99,9 +99,13 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "html", "lcov"],
-      include: ["src/**/*.{ts,tsx}"],
+      // Воркер (блок 9) — тоже наш код, и порог у него общий с приложением:
+      // вынести его из include значило бы написать непокрытую логику отправки
+      // уведомлений и не заметить этого по числам.
+      include: ["src/**/*.{ts,tsx}", "workers/**/*.ts"],
       exclude: [
         "src/**/*.test.{ts,tsx}",
+        "workers/**/*.test.ts",
         "src/test/**",
         // Точка входа: дёргает createRoot и регистрацию service worker — в
         // jsdom это проверяет только то, что моки вызвались.

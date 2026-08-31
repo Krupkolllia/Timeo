@@ -115,14 +115,23 @@ cron, which on Pages would require a second project.
 {
   "name": "timeo",
   "compatibility_date": "2026-08-27",
+  "main": "workers/index.ts",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS"
+  },
+  "triggers": { "crons": ["17 3 * * *"] }
 }
 ```
 
 Deployment is `git push` to the production branch. There is no local deploy command.
+
+`main` arrived with block 9: until then there was no Worker script at all and the asset layer served
+everything. With a script present, a request that matches no file reaches the script, so `workers/index.ts`
+serves assets through the `ASSETS` binding and reproduces the old single-page-application fallback by
+hand. Navigation requests never reach the script — Cloudflare answers those from the asset layer — so
+deep links such as `/settings` behave exactly as before either way.
 
 **Notifications.** A PWA cannot schedule a local notification for a future time: Safari exposes no such
 API and a service worker does not wake on a schedule. The only working path is Web Push from a server.
@@ -136,6 +145,19 @@ Therefore:
 
 **Keep-alive.** A Cloudflare Worker cron pings Supabase daily. Free Supabase projects pause after a
 week of inactivity.
+
+Built in block 9 as one cron (`17 3 * * *`) in the same Worker. The ping is a single `HEAD` to the
+PostgREST root with the anon key — the same request the sync gateway already uses to read server time.
+It touches no table, so no user row is read and no service key is involved; a run makes exactly one
+request, and a test asserts both. An off-the-hour time is deliberate: Cloudflare queues crons at the
+top of the hour and accuracy is irrelevant here — only that a week never passes between two runs.
+Without `SUPABASE_URL` and `SUPABASE_ANON_KEY` in the Worker's runtime environment the run does nothing
+and reports that, rather than failing (invariant 39). A failed request is returned as a result, not
+thrown: the next run is a day away regardless, and a red cron in the dashboard buys nothing.
+
+What this cannot prove from here: whether Supabase counts this particular request as project activity
+is Supabase's own policy, not something the code can verify. The app's own sync also reaches the
+project whenever it is opened; the cron matters only for stretches when nobody opens it.
 
 **Cache headers.** `index.html` and the service worker file must be served with no-cache. Hashed JS and
 CSS assets may be cached indefinitely. A cached `index.html` pins the app to stale asset URLs and makes

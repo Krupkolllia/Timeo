@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // WebWorker, а не DOM: в воркере Cloudflare есть fetch, Request, Response,
+    // URL и crypto.subtle, но нет ни document, ни window — и обращение к ним
+    // должно быть ошибкой типов здесь, а не пятисотой на проде.
+    "lib": ["ES2023", "WebWorker"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "types": ["vitest/importMeta"]
+  },
+  "include": ["workers"]
+}
