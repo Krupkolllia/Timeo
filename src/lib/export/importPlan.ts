@@ -290,14 +290,52 @@ export function planImport(input: ImportPlanInput): ImportPlan {
   }
 
   const holidays: Holiday[] = [];
+
+  const localSeededHolidayByContent = new Map<string, Holiday>();
+
+  if (!replace) {
+    for (const row of current.holidays) {
+      if (row.deleted_at !== null || row.is_custom) continue;
+
+      const key = `${row.date}\u0000${row.name.trim().toLowerCase()}`;
+
+      if (!localSeededHolidayByContent.has(key)) {
+        localSeededHolidayByContent.set(key, row);
+      }
+    }
+  }
+
+  const importedSeededHolidayKeys = new Set<string>();
+
   for (const imported of file.holidays) {
     const local = localHolidays.get(imported.id);
+
     if (local && isSameRow(local, imported)) {
       counts.skipped++;
       continue;
     }
-    // Два праздника на одну дату законны (инвариант 53), поэтому по дате здесь
-    // ничего не отсеивается — только по идентификатору.
+
+    // Государственный/засеянный праздник идентифицируется по содержимому,
+    // а не по UUID: на разных устройствах один и тот же праздник получает
+    // разные id.
+    if (!imported.is_custom) {
+      const key = `${imported.date}\u0000${imported.name.trim().toLowerCase()}`;
+
+      // Уже существует локально.
+      if (localSeededHolidayByContent.has(key)) {
+        counts.skipped++;
+        continue;
+      }
+
+      // Или два одинаковых праздника находятся внутри самого импортируемого файла.
+      if (importedSeededHolidayKeys.has(key)) {
+        counts.skipped++;
+        continue;
+      }
+
+      importedSeededHolidayKeys.add(key);
+    }
+
     const id = local ? newId() : imported.id;
     holidays.push({ ...withUser(imported, userId), id });
     counts.holidays++;
