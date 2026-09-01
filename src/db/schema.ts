@@ -393,5 +393,23 @@ export class TimeoDB extends Dexie {
           })),
       );
     });
+
+    this.version(13).upgrade(async (tx) => {
+      const now = new Date().toISOString();
+
+      await tx
+      .table("day_types")
+      .toCollection()
+      .filter(
+          (row: DayType) =>
+              row.deleted_at === null &&
+              row.name === "Очень длинное название типа дня на сорок",
+      )
+      .modify((row: DayType) => {
+        row.deleted_at = now;
+        row.updated_at = now;
+      });
+    });
+
   }
 }

@@ -19,6 +19,7 @@ import type { ImportMode } from "@/lib/export/importPlan";
 import { refreshActiveUserId } from "@/store/userStore";
 import { useSyncStore } from "@/store/syncStore";
 import type { BackupFile } from "@/lib/export/backup";
+import {ru} from "@/i18n/ru.ts";
 
 /**
  * Очередь из одной операции. Восстановленная сессия и событие onAuthStateChange
@@ -211,9 +212,11 @@ async function syncNow(db: TimeoDB, gateway: CloudGateway | null): Promise<void>
     const meta = await readSyncMeta(db, account.userId);
     useSyncStore.getState().set({ phase: "idle", lastSyncAt: meta.last_sync_at, lastError: null });
   } catch (error) {
+    console.error("Timeo sync failed", error);
+
     useSyncStore.getState().set({
       phase: "error",
-      lastError: error instanceof Error ? error.message : String(error),
+      lastError: ru.error.syncFailed,
     });
   }
 }

@@ -1,4 +1,4 @@
-import type { BaseRecord, DayType, Entry } from "@/types/models";
+import type { BaseRecord, DayType, Entry, Period } from "@/types/models";
 import type { RemoteRow } from "@/lib/sync/types";
 
 /**
@@ -28,8 +28,8 @@ function ms(iso: string): number {
  * updated_at чинится (clampFutureUpdatedAt) — иначе «навсегда» вернулось бы.
  */
 export function comparableUpdatedAt(
-  row: { updated_at: string; server_updated_at?: string | null },
-  serverNow: string,
+    row: { updated_at: string; server_updated_at?: string | null },
+    serverNow: string,
 ): number {
   const own = ms(row.updated_at);
   if (own <= ms(serverNow) + CLOCK_SKEW_TOLERANCE_MS) return own;
@@ -44,9 +44,9 @@ export type Winner = "local" | "remote";
  * начинает гонять строку туда-обратно.
  */
 export function resolveRow(
-  local: { updated_at: string },
-  remote: { updated_at: string; server_updated_at?: string | null },
-  serverNow: string,
+    local: { updated_at: string },
+    remote: { updated_at: string; server_updated_at?: string | null },
+    serverNow: string,
 ): Winner {
   const l = comparableUpdatedAt(local, serverNow);
   const r = comparableUpdatedAt(remote, serverNow);
@@ -68,37 +68,38 @@ export function clampFutureUpdatedAt<T extends BaseRecord>(row: T, serverNow: st
 
 /**
  * Одинаковы ли строки по содержимому. Ключи сортируются: порядок полей у
- * объекта из Dexie и у строки из Postgres разный, а разными строки от этого не
- * становятся.
+ * объекта из Dexie и у строки из Postgres разный, а разными строки от этого
+ * не становятся.
  */
 export function rowsEqual(a: BaseRecord, b: BaseRecord): boolean {
-  // Сортировка нужна на всех уровнях, а не только на верхнем: closed_totals и
-  // weekend_multipliers — это jsonb, а Postgres хранит его ключи в своём
-  // порядке. Вернувшаяся строка отличалась бы от отправленной, и эхо
-  // собственной выгрузки записывалось бы в базу заново каждый цикл.
   const canon = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(canon);
     if (value === null || typeof value !== "object") return value;
+
     return Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => key !== "server_updated_at")
-      .sort(([x], [y]) => (x < y ? -1 : 1))
-      .map(([key, item]) => [key, canon(item)]);
+    .filter(([key]) => key !== "server_updated_at")
+    .sort(([x], [y]) => (x < y ? -1 : 1))
+    .map(([key, item]) => [key, canon(item)]);
   };
+
   return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
 export interface PullPlan<T extends BaseRecord> {
   /** Строки, которые надо записать в локальную базу. */
   apply: T[];
+
   /** Идентификаторы строк, где победила локальная версия — их надо выгрузить. */
   keptLocal: string[];
 }
 
-/** Общий случай: периоды, праздники, настройки. Только LWW, построчно. */
+/**
+ * Общий случай: обычное построчное сопоставление по id.
+ */
 export function planPull<T extends BaseRecord>(
-  local: Map<string, T>,
-  remote: RemoteRow<T>[],
-  serverNow: string,
+    local: Map<string, T>,
+    remote: RemoteRow<T>[],
+    serverNow: string,
 ): PullPlan<T> {
   const apply: T[] = [];
   const keptLocal: string[] = [];
@@ -106,22 +107,181 @@ export function planPull<T extends BaseRecord>(
   for (const row of remote) {
     const own = local.get(row.id);
     const incoming = stripServerColumn(row);
+
     if (!own) {
       apply.push(incoming);
       continue;
     }
-    // Эхо собственной выгрузки: строка вернулась ровно такой, какой уехала.
-    // Записывать её незачем, и считать «принятой» — тоже, иначе экран сообщал
-    // бы о синхронизации, которой не было.
+
     if (rowsEqual(own, incoming)) continue;
-    if (resolveRow(own, row, serverNow) === "remote") apply.push(incoming);
-    else keptLocal.push(row.id);
+
+    if (resolveRow(own, row, serverNow) === "remote") {
+      apply.push(incoming);
+    } else {
+      keptLocal.push(row.id);
+    }
   }
 
   return { apply, keptLocal };
 }
 
-/** Серверная отметка живёт только в облаке и в курсоре докачки — в локальную модель она не входит. */
+/**
+ * Period — особенный случай.
+ *
+ * В PostgreSQL логическая уникальность периода:
+ *
+ *   user_id + year + month
+ *
+ * поэтому два разных UUID для одного месяца нельзя считать двумя независимыми
+ * строками.
+ *
+ * removeLocalIds нужны, когда победил remote period с другим UUID: старую
+ * локальную строку надо убрать ДО записи remote, иначе локально будут два live
+ * периода одного месяца.
+ */
+export interface PeriodPullPlan extends PullPlan<Period> {
+  removeLocalIds: string[];
+}
+
+/**
+ * Планирование pull для periods.
+ *
+ * Алгоритм:
+ * 1. Сопоставляем сначала по id.
+ * 2. Если id другой, ищем уже существующий live period того же месяца.
+ * 3. При конфликте применяем существующее LWW-правило.
+ * 4. Победил remote → старый local id удаляется из локальной DB, remote
+ *    применяется.
+ * 5. Победил local → remote пропускается, local id идёт в forcePush.
+ *
+ * Дополнительно remote строки одного месяца внутри одной страницы тоже
+ * дедуплицируются: обработка идёт последовательно, а не по исходному snapshot
+ * local map.
+ */
+export function planPeriodsPull(
+    local: Map<string, Period>,
+    remote: RemoteRow<Period>[],
+    serverNow: string,
+): PeriodPullPlan {
+  const localByMonth = new Map<string, Period>();
+
+  for (const row of local.values()) {
+    if (row.deleted_at !== null) continue;
+
+    const key = `${row.user_id}\u0000${row.year}\u0000${row.month}`;
+    const existing = localByMonth.get(key);
+
+    if (!existing) {
+      localByMonth.set(key, row);
+      continue;
+    }
+
+    // Если старый клиент уже создал несколько live periods одного месяца,
+    // временно выбираем наиболее свежую локальную версию как кандидата.
+    const winner =
+        resolveRow(existing, row, serverNow) === "remote"
+            ? row
+            : existing;
+
+    localByMonth.set(key, winner);
+  }
+
+  const apply: Period[] = [];
+  const keptLocal = new Set<string>();
+  const removeLocalIds = new Set<string>();
+
+  // Что уже решили принять/оставить в рамках этой remote-страницы.
+  const remoteByMonth = new Map<string, Period>();
+
+  for (const row of remote) {
+    const incoming = stripServerColumn(row);
+
+    // Удалённые remote rows не участвуют в live month uniqueness.
+    // Их обычное id-based поведение должно сохраниться.
+    if (row.deleted_at !== null) {
+      const own = local.get(row.id);
+
+      if (!own) {
+        apply.push(incoming);
+      } else if (!rowsEqual(own, incoming)) {
+        if (resolveRow(own, row, serverNow) === "remote") {
+          apply.push(incoming);
+        } else {
+          keptLocal.add(own.id);
+        }
+      }
+
+      continue;
+    }
+
+    const sameId = local.get(row.id);
+
+    // Обычный случай: тот же period по id.
+    if (sameId) {
+      if (rowsEqual(sameId, incoming)) continue;
+
+      if (resolveRow(sameId, row, serverNow) === "remote") {
+        apply.push(incoming);
+
+        const key = `${row.user_id}\u0000${row.year}\u0000${row.month}`;
+        remoteByMonth.set(key, incoming);
+      } else {
+        keptLocal.add(sameId.id);
+      }
+
+      continue;
+    }
+
+    const key = `${row.user_id}\u0000${row.year}\u0000${row.month}`;
+
+    // Сначала проверяем уже принятый remote period этой страницы.
+    const acceptedRemote = remoteByMonth.get(key);
+
+    if (acceptedRemote) {
+      // В одной remote page пришёл второй live period того же месяца.
+      // Сравниваем их по LWW и оставляем только победителя.
+      if (resolveRow(acceptedRemote, row, serverNow) === "remote") {
+        const index = apply.findIndex(
+            (candidate) => candidate.id === acceptedRemote.id,
+        );
+
+        if (index >= 0) {
+          apply[index] = incoming;
+        }
+
+        remoteByMonth.set(key, incoming);
+      }
+
+      continue;
+    }
+
+    const sameMonth = localByMonth.get(key);
+
+    // Такого месяца локально нет — remote можно принять.
+    if (!sameMonth) {
+      apply.push(incoming);
+      remoteByMonth.set(key, incoming);
+      continue;
+    }
+
+    // Один и тот же logical period, но разные UUID.
+    if (resolveRow(sameMonth, row, serverNow) === "remote") {
+      removeLocalIds.add(sameMonth.id);
+      apply.push(incoming);
+      remoteByMonth.set(key, incoming);
+    } else {
+      keptLocal.add(sameMonth.id);
+    }
+  }
+
+  return {
+    apply,
+    keptLocal: [...keptLocal],
+    removeLocalIds: [...removeLocalIds],
+  };
+}
+
+/** Серверная отметка живёт только в облаке и в курсоре докачки. */
 export function stripServerColumn<T extends BaseRecord>(row: RemoteRow<T>): T {
   const copy = { ...row } as unknown as Record<string, unknown>;
   delete copy.server_updated_at;
@@ -131,17 +291,16 @@ export function stripServerColumn<T extends BaseRecord>(row: RemoteRow<T>): T {
 export interface DayTypePullPlan extends PullPlan<DayType> {
   /**
    * Инвариант 37: приехало удаление типа дня, на который локально ссылаются
-   * живые записи. Побеждает та версия, в которой тип существует, — тип
-   * остаётся живым и уезжает обратно в облако.
+   * живые записи.
    */
   resurrect: DayType[];
 }
 
 export function planDayTypesPull(
-  local: Map<string, DayType>,
-  remote: RemoteRow<DayType>[],
-  serverNow: string,
-  referencedTypeIds: ReadonlySet<string>,
+    local: Map<string, DayType>,
+    remote: RemoteRow<DayType>[],
+    serverNow: string,
+    referencedTypeIds: ReadonlySet<string>,
 ): DayTypePullPlan {
   const base = planPull(local, remote, serverNow);
   const apply: DayType[] = [];
@@ -149,45 +308,52 @@ export function planDayTypesPull(
 
   for (const row of base.apply) {
     if (row.deleted_at !== null && referencedTypeIds.has(row.id)) {
-      // Берём приехавшую версию, а не локальную: в base.apply строка попадает
-      // только когда своей версии нет вовсе либо удалённая выиграла
-      // last-write-wins, то есть локальная здесь заведомо устаревшая. Разлив её
-      // обратно (воскрешённое уходит в forcePush) откатил бы переименование и
-      // множитель на всех устройствах. Отменяем только удаление.
-      resurrect.push({ ...row, deleted_at: null, updated_at: serverNow });
+      resurrect.push({
+        ...row,
+        deleted_at: null,
+        updated_at: serverNow,
+      });
       continue;
     }
+
     apply.push(row);
   }
 
-  return { apply, keptLocal: base.keptLocal, resurrect };
+  return {
+    apply,
+    keptLocal: base.keptLocal,
+    resurrect,
+  };
 }
 
 export interface EntryPullPlan extends PullPlan<Entry> {
   /**
-   * Инвариант 37: запись приехала раньше своего типа дня. Не пишем её вовсе —
-   * запись без типа не открывается на экране дня и не считается в итогах. Она
-   * приедет на следующем проходе, когда тип уже будет.
+   * Инвариант 37: запись приехала раньше своего типа дня.
    */
   deferred: Entry[];
 }
 
 export function planEntriesPull(
-  local: Map<string, Entry>,
-  remote: RemoteRow<Entry>[],
-  serverNow: string,
-  knownTypeIds: ReadonlySet<string>,
+    local: Map<string, Entry>,
+    remote: RemoteRow<Entry>[],
+    serverNow: string,
+    knownTypeIds: ReadonlySet<string>,
 ): EntryPullPlan {
   const base = planPull(local, remote, serverNow);
   const apply: Entry[] = [];
   const deferred: Entry[] = [];
 
   for (const row of base.apply) {
-    // Удаление применяем всегда: осиротить оно не может, а держать его до
-    // приезда типа значило бы показывать день, который человек стёр.
-    if (row.deleted_at === null && !knownTypeIds.has(row.day_type_id)) deferred.push(row);
-    else apply.push(row);
+    if (row.deleted_at === null && !knownTypeIds.has(row.day_type_id)) {
+      deferred.push(row);
+    } else {
+      apply.push(row);
+    }
   }
 
-  return { apply, keptLocal: base.keptLocal, deferred };
+  return {
+    apply,
+    keptLocal: base.keptLocal,
+    deferred,
+  };
 }
