@@ -188,13 +188,16 @@ export function CalendarPage() {
   }, []);
 
   function handleEntryDeleted(entry: Entry) {
-    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-    setPendingUndo(entry);
     if (undoTimeoutRef.current !== null) {
       clearTimeout(undoTimeoutRef.current);
     }
 
-    undoTimeoutRef.current = setTimeout(() => setPendingUndo(null), 5000);
+    setPendingUndo(entry);
+
+    undoTimeoutRef.current = setTimeout(() => {
+      setPendingUndo(null);
+      undoTimeoutRef.current = null;
+    }, 5000);
   }
 
   async function handleUndoDelete() {
