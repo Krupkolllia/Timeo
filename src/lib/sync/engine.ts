@@ -6,6 +6,7 @@ import {
   planEntriesPull,
   planPeriodsPull,
   planPull,
+  resolveRow,
   stripServerColumn,
 } from "@/lib/sync/merge";
 import {
@@ -198,7 +199,7 @@ async function applyPulledPage(
           /**
            * Если remote period победил period с другим UUID, сначала удаляем
            * конфликтующий local row. Иначе bulkPut(remote) создаст второй live
-           * period, а следующий push упадёт на periods_user_month_uniq.
+           * period.
            */
           if (plan.removeLocalIds.length) {
             await Promise.all(
@@ -335,6 +336,97 @@ async function pullTable(
   }
 }
 
+/**
+ * Проверяет live period на сервере перед его выгрузкой.
+ *
+ * Это нужно потому, что incremental pull может не вернуть существующий
+ * server period, если локальный pull cursor уже прошёл его server_updated_at.
+ *
+ * Результат содержит только те локальные periods, которые действительно
+ * нужно отправить. Если серверная версия победила, локальная строка заменяется
+ * на неё и из push исключается.
+ */
+async function reconcilePeriodsBeforePush(
+    db: TimeoDB,
+    gateway: CloudGateway,
+    userId: string,
+    candidates: Period[],
+    serverNow: string,
+): Promise<Period[]> {
+  const result: Period[] = [];
+
+  for (const local of candidates) {
+    // Удалённые периоды не должны участвовать в live logical-key конфликте.
+    if (local.deleted_at !== null) {
+      result.push(local);
+      continue;
+    }
+
+    const remote = await gateway.findPeriod(
+        userId,
+        local.year,
+        local.month,
+    );
+
+    // На сервере live period этого месяца нет.
+    if (!remote) {
+      result.push(local);
+      continue;
+    }
+
+    // Тот же UUID — обычный upsert безопасен.
+    if (remote.id === local.id) {
+      result.push(local);
+      continue;
+    }
+
+    /**
+     * Разные UUID, но один logical period:
+     *
+     *   user_id + year + month
+     *
+     * Используем существующее LWW-правило.
+     */
+    const winner = resolveRow(
+        local,
+        remote,
+        serverNow,
+    );
+
+    if (winner === "remote") {
+      /**
+       * Remote новее.
+       *
+       * Старый локальный UUID удаляем из локальной базы и сохраняем
+       * серверную версию.
+       */
+      await db.periods.delete(local.id);
+
+      await db.periods.put(
+          stripServerColumn(remote) as Period,
+      );
+
+      continue;
+    }
+
+    /**
+     * Local новее.
+     *
+     * Сначала освобождаем server-side unique key через soft-delete
+     * существующего remote period.
+     */
+    await gateway.softDeletePeriod(
+        remote.id,
+        userId,
+        serverNow,
+    );
+
+    result.push(local);
+  }
+
+  return result;
+}
+
 async function pushTable(
     db: TimeoDB,
     gateway: CloudGateway,
@@ -381,7 +473,27 @@ async function pushTable(
     return;
   }
 
-  const ordered = [...candidates].sort((a, b) =>
+  /**
+   * Только periods требуют отдельной проверки logical uniqueness.
+   * Остальные таблицы продолжают использовать общий push.
+   */
+  let candidatesToPush = candidates;
+
+  if (table === "periods") {
+    candidatesToPush = await reconcilePeriodsBeforePush(
+        db,
+        gateway,
+        userId,
+        candidates as Period[],
+        serverNow,
+    );
+  }
+
+  if (candidatesToPush.length === 0) {
+    return;
+  }
+
+  const ordered = [...candidatesToPush].sort((a, b) =>
       a.updated_at < b.updated_at
           ? -1
           : a.updated_at > b.updated_at
