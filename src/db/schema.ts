@@ -411,5 +411,138 @@ export class TimeoDB extends Dexie {
       });
     });
 
+    this.version(14).upgrade(async (tx) => {
+      /**
+       * Cleanup уже существующих баз:
+       *
+       * 1. Удаляем/архивируем дубли day_types.
+       *    Логическая идентичность:
+       *    user_id + name + pay_mode.
+       *
+       *    Если на дубль есть живая entry — архивируем его,
+       *    чтобы не сломать историю.
+       *    Если ссылок нет — мягко удаляем.
+       *
+       * 2. Удаляем дубли seeded holidays.
+       *    Custom holidays никогда не трогаем.
+       *
+       * 3. Удаляем тестовый day type.
+       */
+
+      const now = new Date().toISOString();
+
+      // ─────────────────────────────────────────────
+      // Day types
+      // ─────────────────────────────────────────────
+
+      const dayTypes =
+          (await tx.table("day_types").toArray()) as DayType[];
+
+      const entries =
+          (await tx.table("entries").toArray()) as Entry[];
+
+      const referencedDayTypeIds = new Set(
+          entries
+          .filter((row) => row.deleted_at === null)
+          .map((row) => row.day_type_id),
+      );
+
+      const survivors = new Map<string, DayType>();
+      const duplicates: DayType[] = [];
+
+      const liveDayTypes = dayTypes
+      .filter((row) => row.deleted_at === null)
+      .sort((a, b) => {
+        if (a.created_at !== b.created_at) {
+          return a.created_at < b.created_at ? -1 : 1;
+        }
+
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+
+      for (const row of liveDayTypes) {
+        const key =
+            `${row.user_id}\u0000${row.name.trim().toLowerCase()}\u0000${row.pay_mode}`;
+
+        if (!survivors.has(key)) {
+          survivors.set(key, row);
+        } else {
+          duplicates.push(row);
+        }
+      }
+
+      const testDayTypes = liveDayTypes.filter(
+          (row) =>
+              row.name ===
+              "Очень длинное название типа дня на сорок",
+      );
+
+      const dayTypeUpdates = [
+        ...duplicates.map((row) => ({
+          ...row,
+          ...(referencedDayTypeIds.has(row.id)
+              ? { is_archived: true }
+              : { deleted_at: now }),
+          updated_at: now,
+        })),
+        ...testDayTypes
+        .filter((row) => !duplicates.some((dup) => dup.id === row.id))
+        .map((row) => ({
+          ...row,
+          deleted_at: now,
+          updated_at: now,
+        })),
+      ];
+
+      if (dayTypeUpdates.length > 0) {
+        await tx.table("day_types").bulkPut(dayTypeUpdates);
+      }
+
+      // ─────────────────────────────────────────────
+      // Seeded holidays
+      // ─────────────────────────────────────────────
+
+      const holidays =
+          (await tx.table("holidays").toArray()) as Holiday[];
+
+      const holidaySurvivors = new Map<string, Holiday>();
+      const holidayDuplicates: Holiday[] = [];
+
+      const liveSeededHolidays = holidays
+      .filter(
+          (row) =>
+              row.deleted_at === null &&
+              !row.is_custom,
+      )
+      .sort((a, b) => {
+        if (a.created_at !== b.created_at) {
+          return a.created_at < b.created_at ? -1 : 1;
+        }
+
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+
+      for (const row of liveSeededHolidays) {
+        const key =
+            `${row.user_id}\u0000${row.date}\u0000${row.name}`;
+
+        if (!holidaySurvivors.has(key)) {
+          holidaySurvivors.set(key, row);
+        } else {
+          holidayDuplicates.push(row);
+        }
+      }
+
+      if (holidayDuplicates.length > 0) {
+        await tx.table("holidays").bulkPut(
+            holidayDuplicates.map((row) => ({
+              ...row,
+              deleted_at: now,
+              updated_at: now,
+            })),
+        );
+      }
+    });
+
   }
 }
