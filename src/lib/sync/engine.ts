@@ -33,15 +33,14 @@ import type {
 export const PULL_PAGE_SIZE = 500;
 export const PUSH_CHUNK_SIZE = 200;
 
-export const PUSH_WATERMARK_MARGIN_MS =
-    60_000;
+/**
+ * Запас, на который водяной знак выгрузки отодвигается назад при отборе строк.
+ */
+export const PUSH_WATERMARK_MARGIN_MS = 60_000;
 
 type AnyRow = BaseRecord;
 
-function tableOf(
-    db: TimeoDB,
-    table: SyncTable,
-) {
+function tableOf(db: TimeoDB, table: SyncTable) {
   switch (table) {
     case "settings":
       return db.settings;
@@ -61,28 +60,26 @@ async function localRows(
     table: SyncTable,
     userId: string,
 ): Promise<AnyRow[]> {
-  const rows =
-      await tableOf(db, table)
-      .where("user_id")
-      .equals(userId)
-      .toArray();
+  const rows = await tableOf(db, table)
+  .where("user_id")
+  .equals(userId)
+  .toArray();
 
   return rows as AnyRow[];
 }
 
-function byId<
-    T extends BaseRecord,
->(
+function byId<T extends BaseRecord>(
     rows: T[],
 ): Map<string, T> {
   return new Map(
-      rows.map((row) => [
-        row.id,
-        row,
-      ]),
+      rows.map((row) => [row.id, row]),
   );
 }
 
+/**
+ * Строка настроек — одна на пользователя, и в Postgres это записано
+ * ограничением unique(user_id).
+ */
 async function normalizeSettingsId(
     db: TimeoDB,
     userId: string,
@@ -91,40 +88,26 @@ async function normalizeSettingsId(
       "rw",
       db.settings,
       async () => {
-        const rows =
-            await db.settings
-            .where("user_id")
-            .equals(userId)
-            .toArray();
+        const rows = await db.settings
+        .where("user_id")
+        .equals(userId)
+        .toArray();
 
-        const wrong =
-            rows.filter(
-                (row) =>
-                    row.id !== userId,
-            );
+        const wrong = rows.filter(
+            (row) => row.id !== userId,
+        );
 
-        if (wrong.length === 0) {
-          return;
-        }
+        if (wrong.length === 0) return;
 
-        const newest =
-            [...rows].sort(
-                (a, b) =>
-                    a.updated_at <
-                    b.updated_at
-                        ? 1
-                        : -1,
-            )[0];
+        const newest = [...rows].sort((a, b) =>
+            a.updated_at < b.updated_at ? 1 : -1,
+        )[0];
 
         for (const row of wrong) {
-          await db.settings.delete(
-              row.id,
-          );
+          await db.settings.delete(row.id);
         }
 
-        if (
-            newest.id !== userId
-        ) {
+        if (newest.id !== userId) {
           await db.settings.put({
             ...newest,
             id: userId,
@@ -145,8 +128,7 @@ async function applyPulledPage(
   forcePush: string[];
   deferredIds: Set<string>;
 }> {
-  const target =
-      tableOf(db, table);
+  const target = tableOf(db, table);
 
   return db.transaction(
       "rw",
@@ -156,157 +138,84 @@ async function applyPulledPage(
       db.holidays,
       db.entries,
       async () => {
-        const local =
-            byId(
-                await localRows(
-                    db,
-                    table,
-                    userId,
-                ),
-            );
+        const local = byId(
+            await localRows(db, table, userId),
+        );
 
         if (table === "entries") {
-          const dayTypeIds =
-              new Set(
-                  (await db.day_types
-                  .where("user_id")
-                  .equals(userId)
-                  .primaryKeys()) as string[],
-              );
+          const dayTypeIds = new Set(
+              (await db.day_types
+              .where("user_id")
+              .equals(userId)
+              .primaryKeys()) as string[],
+          );
 
-          const plan =
-              planEntriesPull(
-                  local as Map<
-                      string,
-                      Entry
-                  >,
-                  page as RemoteRow<Entry>[],
-                  serverNow,
-                  dayTypeIds,
-              );
+          const plan = planEntriesPull(
+              local as Map<string, Entry>,
+              page as RemoteRow<Entry>[],
+              serverNow,
+              dayTypeIds,
+          );
 
-          if (
-              plan.apply.length
-          ) {
-            await db.entries.bulkPut(
-                plan.apply,
-            );
+          if (plan.apply.length) {
+            await db.entries.bulkPut(plan.apply);
           }
 
           return {
-            applied:
-            plan.apply.length,
-            forcePush:
-            plan.keptLocal,
-            deferredIds:
-                new Set(
-                    plan.deferred.map(
-                        (row) =>
-                            row.id,
-                    ),
-                ),
+            applied: plan.apply.length,
+            forcePush: plan.keptLocal,
+            deferredIds: new Set(
+                plan.deferred.map((row) => row.id),
+            ),
           };
         }
 
         if (table === "day_types") {
-          const referenced =
-              new Set<string>();
+          const referenced = new Set<string>();
 
-          for (
-              const entry of
-              await db.entries
-              .where("user_id")
-              .equals(userId)
-              .toArray()
-              ) {
-            if (
-                entry.deleted_at === null
-            ) {
-              referenced.add(
-                  entry.day_type_id,
-              );
+          for (const entry of await db.entries
+          .where("user_id")
+          .equals(userId)
+          .toArray()) {
+            if (entry.deleted_at === null) {
+              referenced.add(entry.day_type_id);
             }
           }
 
-          const plan =
-              planDayTypesPull(
-                  local as Map<
-                      string,
-                      DayType
-                  >,
-                  page as RemoteRow<DayType>[],
-                  serverNow,
-                  referenced,
-              );
+          const plan = planDayTypesPull(
+              local as Map<string, DayType>,
+              page as RemoteRow<DayType>[],
+              serverNow,
+              referenced,
+          );
 
-          /**
-           * Duplicate local type, на который никто не ссылается:
-           * можно полностью убрать локально.
-           */
-          if (
-              plan.removeLocalIds
-                  .length
-          ) {
+          if (plan.removeLocalIds.length) {
             await Promise.all(
-                plan.removeLocalIds.map(
-                    (id) =>
-                        db.day_types.delete(
-                            id,
-                        ),
+                plan.removeLocalIds.map((id) =>
+                    db.day_types.delete(id),
                 ),
             );
           }
 
-          /**
-           * Duplicate local type, который нужен старой entry:
-           * не удаляем, а архивируем.
-           */
-          if (
-              plan.archiveLocalIds
-                  .length
-          ) {
-            const now =
-                serverNow;
-
+          if (plan.archiveLocalIds.length) {
             await Promise.all(
-                plan.archiveLocalIds.map(
-                    (id) =>
-                        db.day_types.update(
-                            id,
-                            {
-                              is_archived:
-                                  true,
-                              updated_at:
-                              now,
-                            },
-                        ),
+                plan.archiveLocalIds.map((id) =>
+                    db.day_types.update(id, {
+                      is_archived: true,
+                      updated_at: serverNow,
+                    }),
                 ),
             );
           }
 
-          if (
-              plan.apply.length
-          ) {
-            await db.day_types.bulkPut(
-                plan.apply,
-            );
+          if (plan.apply.length) {
+            await db.day_types.bulkPut(plan.apply);
           }
 
-          if (
-              plan.resurrect.length
-          ) {
-            await db.day_types.bulkPut(
-                plan.resurrect,
-            );
+          if (plan.resurrect.length) {
+            await db.day_types.bulkPut(plan.resurrect);
           }
 
-          /**
-           * archiveRemote пока не используется.
-           * Мы специально не отправляем автоматическую архивацию обратно
-           * в сервер в этой функции: сначала локально приводим состояние к
-           * безопасному виду, а обычный push следующим проходом отдаст строки
-           * с updated_at, если они реально были изменены.
-           */
           return {
             applied:
                 plan.apply.length +
@@ -317,130 +226,90 @@ async function applyPulledPage(
                   (row) => row.id,
               ),
             ],
-            deferredIds:
-                new Set<string>(),
+            deferredIds: new Set<string>(),
           };
         }
 
         if (table === "periods") {
-          const plan =
-              planPeriodsPull(
-                  local as Map<
-                      string,
-                      Period
-                  >,
-                  page as RemoteRow<Period>[],
-                  serverNow,
-              );
+          const plan = planPeriodsPull(
+              local as Map<string, Period>,
+              page as RemoteRow<Period>[],
+              serverNow,
+          );
 
-          if (
-              plan.removeLocalIds
-                  .length
-          ) {
+          if (plan.removeLocalIds.length) {
             await Promise.all(
-                plan.removeLocalIds.map(
-                    (id) =>
-                        db.periods.delete(
-                            id,
-                        ),
+                plan.removeLocalIds.map((id) =>
+                    db.periods.delete(id),
                 ),
             );
           }
 
-          if (
-              plan.apply.length
-          ) {
-            await db.periods.bulkPut(
-                plan.apply,
-            );
+          if (plan.apply.length) {
+            await db.periods.bulkPut(plan.apply);
           }
 
           return {
-            applied:
-            plan.apply.length,
-            forcePush:
-            plan.keptLocal,
-            deferredIds:
-                new Set<string>(),
+            applied: plan.apply.length,
+            forcePush: plan.keptLocal,
+            deferredIds: new Set<string>(),
           };
         }
 
         if (table === "holidays") {
-          const plan =
-              planHolidaysPull(
-                  local as Map<
-                      string,
-                      Holiday
-                  >,
-                  page as RemoteRow<Holiday>[],
-                  serverNow,
-              );
+          const plan = planHolidaysPull(
+              local as Map<string, Holiday>,
+              page as RemoteRow<Holiday>[],
+              serverNow,
+          );
 
-          if (
-              plan.removeLocalIds
-                  .length
-          ) {
+          if (plan.removeLocalIds.length) {
             await Promise.all(
-                plan.removeLocalIds.map(
-                    (id) =>
-                        db.holidays.delete(
-                            id,
-                        ),
+                plan.removeLocalIds.map((id) =>
+                    db.holidays.delete(id),
                 ),
             );
           }
 
-          if (
-              plan.apply.length
-          ) {
-            await db.holidays.bulkPut(
-                plan.apply,
-            );
+          if (plan.apply.length) {
+            await db.holidays.bulkPut(plan.apply);
           }
 
           return {
-            applied:
-            plan.apply.length,
-            forcePush:
-            plan.keptLocal,
-            deferredIds:
-                new Set<string>(),
+            applied: plan.apply.length,
+            forcePush: plan.keptLocal,
+            deferredIds: new Set<string>(),
           };
         }
 
-        const plan =
-            planPull(
-                local,
-                page as RemoteRow<AnyRow>[],
-                serverNow,
-            );
+        const plan = planPull(
+            local,
+            page as RemoteRow<AnyRow>[],
+            serverNow,
+        );
 
-        if (
-            plan.apply.length
-        ) {
+        if (plan.apply.length) {
           await (
               target as unknown as {
                 bulkPut: (
                     rows: AnyRow[],
                 ) => Promise<unknown>;
               }
-          ).bulkPut(
-              plan.apply,
-          );
+          ).bulkPut(plan.apply);
         }
 
         return {
-          applied:
-          plan.apply.length,
-          forcePush:
-          plan.keptLocal,
-          deferredIds:
-              new Set<string>(),
+          applied: plan.apply.length,
+          forcePush: plan.keptLocal,
+          deferredIds: new Set<string>(),
         };
       },
   );
 }
 
+/**
+ * Курсор двигается только по строкам, которые действительно легли в базу.
+ */
 function advanceCursor(
     page: RemoteRow[],
     deferredIds: Set<string>,
@@ -449,16 +318,11 @@ function advanceCursor(
   let cursor = current;
 
   for (const row of page) {
-    if (
-        deferredIds.has(
-            row.id,
-        )
-    ) {
+    if (deferredIds.has(row.id)) {
       return cursor;
     }
 
-    cursor =
-        row.server_updated_at;
+    cursor = row.server_updated_at;
   }
 
   return cursor;
@@ -476,58 +340,41 @@ async function pullTable(
     justPulled: Set<string>,
 ): Promise<void> {
   let cursor =
-      meta.pull_cursor[
-          table
-          ] ?? null;
+      meta.pull_cursor[table] ?? null;
 
   for (;;) {
-    const page =
-        await gateway.pull(
-            table,
-            userId,
-            cursor,
-            PULL_PAGE_SIZE,
-        );
+    const page = await gateway.pull(
+        table,
+        userId,
+        cursor,
+        PULL_PAGE_SIZE,
+    );
 
-    if (
-        page.rows.length === 0
-    ) {
+    if (page.rows.length === 0) {
       break;
     }
 
-    const result =
-        await applyPulledPage(
-            db,
-            table,
-            userId,
-            page.rows,
-            serverNow,
-        );
+    const result = await applyPulledPage(
+        db,
+        table,
+        userId,
+        page.rows,
+        serverNow,
+    );
 
-    counts.pulled +=
-        result.applied;
+    counts.pulled += result.applied;
+    counts.deferred += result.deferredIds.size;
 
-    counts.deferred +=
-        result.deferredIds.size;
-
-    for (const id of
-        result.forcePush
-        ) {
+    for (const id of result.forcePush) {
       forcePush.add(
           `${table}:${id}`,
       );
     }
 
-    for (const row of
-        page.rows
-        ) {
+    for (const row of page.rows) {
       if (
-          !result.deferredIds.has(
-              row.id,
-          ) &&
-          !result.forcePush.includes(
-              row.id,
-          )
+          !result.deferredIds.has(row.id) &&
+          !result.forcePush.includes(row.id)
       ) {
         justPulled.add(
             `${table}:${row.id}`,
@@ -535,32 +382,22 @@ async function pullTable(
       }
     }
 
-    if (
-        result.deferredIds.size >
-        0
-    ) {
-      meta.pull_cursor.day_types =
-          undefined;
+    if (result.deferredIds.size > 0) {
+      meta.pull_cursor.day_types = undefined;
     }
 
-    const next =
-        advanceCursor(
-            page.rows,
-            result.deferredIds,
-            cursor,
-        );
+    const next = advanceCursor(
+        page.rows,
+        result.deferredIds,
+        cursor,
+    );
 
-    if (
-        next === cursor
-    ) {
+    if (next === cursor) {
       break;
     }
 
     cursor = next;
-
-    meta.pull_cursor[
-        table
-        ] =
+    meta.pull_cursor[table] =
         cursor ?? undefined;
 
     if (
@@ -572,6 +409,15 @@ async function pullTable(
   }
 }
 
+/**
+ * Перед push periods проверяет, не существует ли на сервере другого UUID
+ * для того же logical period:
+ *
+ *   user_id + year + month
+ *
+ * Incremental pull может не вернуть такой конфликт из-за cursor, поэтому
+ * одного planPeriodsPull() недостаточно.
+ */
 async function reconcilePeriodsBeforePush(
     db: TimeoDB,
     gateway: CloudGateway,
@@ -579,16 +425,14 @@ async function reconcilePeriodsBeforePush(
     candidates: Period[],
     serverNow: string,
 ): Promise<Period[]> {
-  const result: Period[] =
-      [];
+  const result: Period[] = [];
 
-  for (const local of
-      candidates
-      ) {
-    if (
-        local.deleted_at !==
-        null
-    ) {
+  for (const local of candidates) {
+    /**
+     * Удалённые periods не участвуют в live uniqueness.
+     * Они могут быть спокойно отправлены обычным способом.
+     */
+    if (local.deleted_at !== null) {
       result.push(local);
       continue;
     }
@@ -605,23 +449,25 @@ async function reconcilePeriodsBeforePush(
       continue;
     }
 
-    if (
-        remote.id === local.id
-    ) {
+    /**
+     * Это тот же самый object.
+     */
+    if (remote.id === local.id) {
       result.push(local);
       continue;
     }
 
-    const winner =
-        resolveRow(
-            local,
-            remote,
-            serverNow,
-        );
+    const winner = resolveRow(
+        local,
+        remote,
+        serverNow,
+    );
 
-    if (
-        winner === "remote"
-    ) {
+    if (winner === "remote") {
+      /**
+       * Серверная версия новее.
+       * Локальный UUID больше не должен существовать.
+       */
       await db.periods.delete(
           local.id,
       );
@@ -635,6 +481,11 @@ async function reconcilePeriodsBeforePush(
       continue;
     }
 
+    /**
+     * Локальная версия новее.
+     * Сначала освобождаем logical unique key на сервере,
+     * затем обычный push сможет вставить local UUID.
+     */
     await gateway.softDeletePeriod(
         remote.id,
         userId,
@@ -659,36 +510,29 @@ async function pushTable(
     justPulled: Set<string>,
 ): Promise<void> {
   const watermark =
-      meta.pushed_through[
-          table
-          ];
+      meta.pushed_through[table];
 
   const since = watermark
       ? Date.parse(watermark) -
       PUSH_WATERMARK_MARGIN_MS
       : null;
 
-  const rows =
-      await localRows(
-          db,
-          table,
-          userId,
-      );
+  const rows = await localRows(
+      db,
+      table,
+      userId,
+  );
 
-  const candidates =
-      rows.filter((row) => {
+  const candidates = rows.filter(
+      (row) => {
         const key =
             `${table}:${row.id}`;
 
-        if (
-            forcePush.has(key)
-        ) {
+        if (forcePush.has(key)) {
           return true;
         }
 
-        if (
-            justPulled.has(key)
-        ) {
+        if (justPulled.has(key)) {
           return false;
         }
 
@@ -696,16 +540,16 @@ async function pushTable(
           return true;
         }
 
-        const at =
-            Date.parse(
-                row.updated_at,
-            );
+        const at = Date.parse(
+            row.updated_at,
+        );
 
         return (
             Number.isNaN(at) ||
             at >= since
         );
-      });
+      },
+  );
 
   if (
       candidates.length === 0
@@ -728,22 +572,20 @@ async function pushTable(
   }
 
   if (
-      candidatesToPush.length ===
-      0
+      candidatesToPush.length === 0
   ) {
     return;
   }
 
   const ordered =
-      [...candidatesToPush]
-      .sort((a, b) =>
-          a.updated_at <
-          b.updated_at
-              ? -1
-              : a.updated_at >
-              b.updated_at
-                  ? 1
-                  : 0,
+      [...candidatesToPush].sort(
+          (a, b) =>
+              a.updated_at < b.updated_at
+                  ? -1
+                  : a.updated_at >
+                  b.updated_at
+                      ? 1
+                      : 0,
       );
 
   const clamped =
@@ -757,13 +599,10 @@ async function pushTable(
   const repaired =
       clamped.filter(
           (row, index) =>
-              row !==
-              ordered[index],
+              row !== ordered[index],
       );
 
-  if (
-      repaired.length
-  ) {
+  if (repaired.length) {
     await (
         tableOf(
             db,
@@ -773,9 +612,7 @@ async function pushTable(
               rows: AnyRow[],
           ) => Promise<unknown>;
         }
-    ).bulkPut(
-        repaired,
-    );
+    ).bulkPut(repaired);
   }
 
   for (
@@ -799,10 +636,7 @@ async function pushTable(
 
     const highest =
         chunk.reduce(
-            (
-                max,
-                row,
-            ) =>
+            (max, row) =>
                 Number.isFinite(
                     Date.parse(
                         row.updated_at,
@@ -866,8 +700,7 @@ export async function syncOnce(
 
   try {
     for (const table of
-        SYNC_TABLES
-        ) {
+        SYNC_TABLES) {
       await pullTable(
           db,
           gateway,
@@ -882,8 +715,7 @@ export async function syncOnce(
     }
 
     for (const table of
-        SYNC_TABLES
-        ) {
+        SYNC_TABLES) {
       await pushTable(
           db,
           gateway,
