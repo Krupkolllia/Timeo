@@ -906,4 +906,71 @@ describe("TimeoDB schema migration", () => {
     expect(await upgraded.day_types.count()).toBe(0);
     upgraded.close();
   });
+
+  it("схлопывает дубли автоматически засеянных праздников", async () => {
+    dbName = `timeo-test-${crypto.randomUUID()}`;
+
+    const legacy = new Dexie(dbName);
+    legacy.version(1).stores(LEGACY_STORES);
+    await legacy.open();
+
+    const stamps = {
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: null,
+    };
+
+    await legacy.table("holidays").bulkAdd([
+      {
+        id: "h-first",
+        user_id: "user-1",
+        ...stamps,
+        date: "2026-05-01",
+        name: "Święto Pracy",
+        is_custom: false,
+      },
+      {
+        id: "h-second",
+        user_id: "user-1",
+        ...stamps,
+        created_at: "2026-02-01T00:00:00.000Z",
+        date: "2026-05-01",
+        name: "Święto Pracy",
+        is_custom: false,
+      },
+      {
+        id: "h-custom-1",
+        user_id: "user-1",
+        ...stamps,
+        date: "2026-05-01",
+        name: "День фирмы",
+        is_custom: true,
+      },
+      {
+        id: "h-custom-2",
+        user_id: "user-1",
+        ...stamps,
+        date: "2026-05-01",
+        name: "День фирмы",
+        is_custom: true,
+      },
+    ]);
+
+    legacy.close();
+
+    const upgraded = new TimeoDB(dbName);
+    await upgraded.open();
+
+    const first = await upgraded.holidays.get("h-first");
+    const second = await upgraded.holidays.get("h-second");
+
+    expect(first?.deleted_at).toBeNull();
+    expect(second?.deleted_at).not.toBeNull();
+
+    // Custom holidays are deliberately untouched, even on the same date/name.
+    expect((await upgraded.holidays.get("h-custom-1"))?.deleted_at).toBeNull();
+    expect((await upgraded.holidays.get("h-custom-2"))?.deleted_at).toBeNull();
+
+    upgraded.close();
+  });
 });

@@ -355,5 +355,43 @@ export class TimeoDB extends Dexie {
           ),
         );
     });
+
+    this.version(12).upgrade(async (tx) => {
+      const holidays = (await tx.table("holidays").toArray()) as Holiday[];
+
+      const survivors = new Map<string, Holiday>();
+      const duplicates: Holiday[] = [];
+
+      const liveSeeded = holidays
+      .filter((row) => row.deleted_at === null && !row.is_custom)
+      .sort((a, b) => {
+        if (a.created_at !== b.created_at) {
+          return a.created_at < b.created_at ? -1 : 1;
+        }
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+
+      for (const row of liveSeeded) {
+        const key = `${row.user_id}\u0000${row.date}\u0000${row.name}`;
+
+        if (!survivors.has(key)) {
+          survivors.set(key, row);
+        } else {
+          duplicates.push(row);
+        }
+      }
+
+      if (duplicates.length === 0) return;
+
+      const now = new Date().toISOString();
+
+      await tx.table("holidays").bulkPut(
+          duplicates.map((row) => ({
+            ...row,
+            deleted_at: now,
+            updated_at: now,
+          })),
+      );
+    });
   }
 }
